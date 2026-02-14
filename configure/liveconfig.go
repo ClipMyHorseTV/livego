@@ -2,25 +2,16 @@ package configure
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"time"
 
 	"github.com/kr/pretty"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 )
 
-/*
-{
-  "server": [
-    {
-      "appname": "live",
-      "live": true,
-	  "hls": true,
-	  "static_push": []
-    }
-  ]
-}
-*/
+type Applications []Application
 
 type Application struct {
 	Appname    string   `mapstructure:"appname"`
@@ -31,74 +22,174 @@ type Application struct {
 	StaticPush []string `mapstructure:"static_push"`
 }
 
-type Applications []Application
+func (a *Application) Validate() error {
+	if a.Appname == "" {
+		return fmt.Errorf("appname cannot be empty")
+	}
+	return nil
+}
+
+func DefaultApplication() Application {
+	return Application{
+		Appname:    "live",
+		Live:       true,
+		Hls:        true,
+		Flv:        true,
+		Api:        true,
+		StaticPush: nil,
+	}
+}
 
 type JWT struct {
 	Secret    string `mapstructure:"secret"`
 	Algorithm string `mapstructure:"algorithm"`
 }
-type Config struct {
-	Level      string `mapstructure:"level"`
-	ConfigFile string `mapstructure:"config_file"`
+
+type RTMPSConfig struct {
+	CertFile        string `mapstructure:"cert_file"`
+	KeyFile         string `mapstructure:"key_file"`
+	EnableTLSVerify bool   `mapstructure:"enable_tls_verify"`
+}
+
+type RTMPConfig struct {
+	Address string `mapstructure:"address"`
+
+	NoAuth bool `mapstructure:"no_auth"`
 
 	FLVArchive bool   `mapstructure:"flv_archive"`
 	FLVDir     string `mapstructure:"flv_dir"`
-	RTMPNoAuth bool   `mapstructure:"rtmp_noauth"`
-	RTMPAddr   string `mapstructure:"rtmp_addr"`
-	RTMPSCert  string `mapstructure:"rtmps_cert"`
-	RTMPSKey   string `mapstructure:"rtmps_key"`
-	IsRTMPS    bool   `mapstructure:"enable_rtmps"`
 
-	HTTPFLVAddr     string `mapstructure:"httpflv_addr"`
-	HLSAddr         string `mapstructure:"hls_addr"`
-	HLSKeepAfterEnd bool   `mapstructure:"hls_keep_after_end"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 
-	APIAddr string `mapstructure:"api_addr"`
-
-	RedisAddr   string `mapstructure:"redis_addr"`
-	RedisPwd    string `mapstructure:"redis_pwd"`
-	ReadTimeout int    `mapstructure:"read_timeout"`
-
-	WriteTimeout    int  `mapstructure:"write_timeout"`
-	EnableTLSVerify bool `mapstructure:"enable_tls_verify"`
-	GopNum          int  `mapstructure:"gop_num"`
-
-	JWT JWT `mapstructure:"jwt"`
-
-	Server Applications `mapstructure:"server"`
+	RTMPSConfig *RTMPSConfig `mapstructure:"rtmps"`
 }
 
-func defaultConfig() *Config {
-	return &Config{
-		ConfigFile:      "livego.yaml",
-		FLVArchive:      false,
-		RTMPNoAuth:      false,
-		RTMPAddr:        ":1935",
-		HTTPFLVAddr:     ":7001",
-		HLSAddr:         ":7002",
-		HLSKeepAfterEnd: false,
-		APIAddr:         ":8090",
-		WriteTimeout:    10,
-		ReadTimeout:     10,
-		EnableTLSVerify: true,
-		GopNum:          1,
-		Server: Applications{{
-			Appname:    "live",
-			Live:       true,
-			Hls:        true,
-			Flv:        true,
-			Api:        true,
-			StaticPush: nil,
-		}},
+func (c *RTMPConfig) Validate() error {
+	if c.Address == "" {
+		return fmt.Errorf("rtmp address cannot be empty")
+	}
+
+	if c.ReadTimeout <= 0 || c.ReadTimeout > 30*time.Second {
+		return fmt.Errorf("rtmp read_timeout must be between 1s and 30s. Value found: '%s'", c.ReadTimeout)
+	}
+	if c.WriteTimeout <= 0 || c.WriteTimeout > 30*time.Second {
+		return fmt.Errorf("rtmp write_timeout must be between 1s and 30s. Value found: '%s'", c.WriteTimeout)
+	}
+
+	if c.RTMPSConfig != nil {
+		if c.RTMPSConfig.CertFile == "" || c.RTMPSConfig.KeyFile == "" {
+			return fmt.Errorf("both cert_file and key_file must be provided for RTMPS if RTMPS is defined in the config")
+		}
+	}
+
+	return nil
+}
+
+func DefaultRTMPConfig() RTMPConfig {
+	return RTMPConfig{
+		Address:      ":1935",
+		NoAuth:       false,
+		FLVArchive:   false,
+		FLVDir:       "flv",
+		ReadTimeout:  time.Second * 10,
+		WriteTimeout: time.Second * 10,
+		RTMPSConfig:  nil,
 	}
 }
 
+type HLSConfig struct {
+	Address     string `mapstructure:"address"`
+	HTTPFLVAddr string `mapstructure:"httpflv_addr"` // address to server the HTTP-FLV stream, e.g. ":7001"
+
+	KeepAfterEnd    bool `mapstructure:"keep_after_end"`
+	SegmentDuration int  `mapstructure:"segment_duration"`
+	EnableTLSVerify bool `mapstructure:"enable_tls_verify"`
+
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+}
+
+func DefaultHLSConfig() HLSConfig {
+	return HLSConfig{
+		Address:         ":7002",
+		HTTPFLVAddr:     ":7001",
+		KeepAfterEnd:    false,
+		SegmentDuration: 5,
+		EnableTLSVerify: true,
+		ReadTimeout:     time.Second * 10,
+		WriteTimeout:    time.Second * 10,
+	}
+}
+
+type RedisConfig struct {
+	Enabled bool   `mapstructure:"enabled"`
+	Addr    string `mapstructure:"addr"`
+	Pwd     string `mapstructure:"pwd"`
+}
+
+func DefaultRedisConfig() RedisConfig {
+	return RedisConfig{
+		Enabled: false,
+		Addr:    "localhost:6379",
+		Pwd:     "",
+	}
+}
+
+type Config struct {
+	Level        string `mapstructure:"level"`
+	Path         string `mapstructure:"config_file"`
+	RunAsLibrary bool   `mapstructure:"run_as_library"`
+
+	RTMP  RTMPConfig  `mapstructure:"rtmp"`
+	HLS   HLSConfig   `mapstructure:"hls"`
+	Redis RedisConfig `mapstructure:"redis"`
+
+	APIAddr string `mapstructure:"api_addr"`
+
+	GopNum int `mapstructure:"gop_num"`
+
+	Server Applications `mapstructure:"server"`
+
+	JWT *JWT `mapstructure:"jwt"`
+}
+
+func (c *Config) Validate() error {
+	if c.RunAsLibrary {
+		return nil // Skip validation when running as library
+	}
+
+	if c.APIAddr == "" {
+		return fmt.Errorf("api_addr cannot be empty")
+	}
+
+	return nil
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		Level: "info",
+		Path:  "config.yaml",
+
+		RTMP:  DefaultRTMPConfig(),
+		HLS:   DefaultHLSConfig(),
+		Redis: DefaultRedisConfig(),
+
+		APIAddr: ":8080",
+
+		GopNum: 10,
+
+		Server: Applications{DefaultApplication()},
+	}
+
+}
+
 func LoadConfig(configPath string) (*Config, error) {
-	cfg := defaultConfig()
+	cfg := DefaultConfig()
 
 	// If no config path specified, use default
 	if configPath == "" {
-		configPath = cfg.ConfigFile
+		configPath = cfg.Path
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -125,6 +216,19 @@ func LoadConfig(configPath string) (*Config, error) {
 		if err := yaml.Unmarshal(data, cfg); err != nil {
 			if err := json.Unmarshal(data, cfg); err != nil {
 				return nil, err
+			}
+		}
+	}
+
+	if cfg.RunAsLibrary {
+		log.Info("Running as library, skipping config validation")
+		return cfg, nil
+	}
+
+	if cfg.Server != nil {
+		for i, app := range cfg.Server {
+			if err := app.Validate(); err != nil {
+				return nil, fmt.Errorf("validation failed for server[%d]: %v", i, err)
 			}
 		}
 	}

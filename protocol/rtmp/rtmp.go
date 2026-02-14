@@ -23,18 +23,16 @@ const (
 	SAVE_STATICS_INTERVAL = 5000
 )
 
-var (
-	readTimeout  = configure.Config.GetInt("read_timeout")
-	writeTimeout = configure.Config.GetInt("write_timeout")
-)
-
 type Client struct {
+	config *configure.Config
+
 	handler av.Handler
 	getter  av.GetWriter
 }
 
-func NewRtmpClient(h av.Handler, getter av.GetWriter) *Client {
+func NewRtmpClient(config *configure.Config, h av.Handler, getter av.GetWriter) *Client {
 	return &Client{
+		config:  config,
 		handler: h,
 		getter:  getter,
 	}
@@ -46,11 +44,11 @@ func (c *Client) Dial(url string, method string) error {
 		return err
 	}
 	if method == av.PUBLISH {
-		writer := NewVirWriter(connClient)
+		writer := NewVirWriter(c.config, connClient)
 		log.Debugf("client Dial call NewVirWriter url=%s, method=%s", url, method)
 		c.handler.HandleWriter(writer)
 	} else if method == av.PLAY {
-		reader := NewVirReader(connClient)
+		reader := NewVirReader(c.config, connClient)
 		log.Debugf("client Dial call NewVirReader url=%s, method=%s", url, method)
 		c.handler.HandleReader(reader)
 		if c.getter != nil {
@@ -66,15 +64,28 @@ func (c *Client) GetHandle() av.Handler {
 }
 
 type Server struct {
+	config *configure.Config
+
 	handler av.Handler
 	getter  av.GetWriter
+
+	roomKeys *configure.RoomKeysType
 }
 
-func NewRtmpServer(h av.Handler, getter av.GetWriter) *Server {
+func NewRtmpServer(config *configure.Config, h av.Handler, getter av.GetWriter) (*Server, error) {
+	rk, err := configure.NewRoomKeys(config)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Server{
+		config: config,
+
 		handler: h,
 		getter:  getter,
-	}
+
+		roomKeys: rk,
+	}, nil
 }
 
 func (s *Server) Serve(listener net.Listener) (err error) {
@@ -113,7 +124,7 @@ func (s *Server) handleConn(conn *core.Conn) error {
 
 	appname, name, _ := connServer.GetInfo()
 
-	if ret := configure.CheckAppName(appname); !ret {
+	if ret := s.config.CheckAppName(appname); !ret {
 		err := fmt.Errorf("application name=%s is not configured", appname)
 		conn.Close()
 		log.Error("CheckAppName err: ", err)
@@ -122,8 +133,8 @@ func (s *Server) handleConn(conn *core.Conn) error {
 
 	log.Debugf("handleConn: IsPublisher=%v", connServer.IsPublisher())
 	if connServer.IsPublisher() {
-		if configure.Config.GetBool("rtmp_noauth") {
-			key, err := configure.RoomKeys.GetKey(name)
+		if s.config.RTMPNoAuth {
+			key, err := s.roomKeys.GetKey(name)
 			if err != nil {
 				err := fmt.Errorf("Cannot create key err=%s", err.Error())
 				conn.Close()
@@ -132,7 +143,7 @@ func (s *Server) handleConn(conn *core.Conn) error {
 			}
 			name = key
 		}
-		channel, err := configure.RoomKeys.GetChannel(name)
+		channel, err := s.roomKeys.GetChannel(name)
 		if err != nil {
 			err := fmt.Errorf("invalid key err=%s", err.Error())
 			conn.Close()
@@ -140,10 +151,10 @@ func (s *Server) handleConn(conn *core.Conn) error {
 			return err
 		}
 		connServer.PublishInfo.Name = channel
-		if pushlist, ret := configure.GetStaticPushUrlList(appname); ret && (pushlist != nil) {
+		if pushlist, ret := s.config.GetStaticPushUrlList(appname); ret && (pushlist != nil) {
 			log.Debugf("GetStaticPushUrlList: %v", pushlist)
 		}
-		reader := NewVirReader(connServer)
+		reader := NewVirReader(s.config, connServer)
 		s.handler.HandleReader(reader)
 		log.Debugf("new publisher: %+v", reader.Info())
 
@@ -153,12 +164,12 @@ func (s *Server) handleConn(conn *core.Conn) error {
 			writer := s.getter.GetWriter(reader.Info())
 			s.handler.HandleWriter(writer)
 		}
-		if configure.Config.GetBool("flv_archive") {
-			flvWriter := new(flv.FlvDvr)
+		if s.config.FLVArchive {
+			flvWriter := flv.NewFlvDvr(s.config)
 			s.handler.HandleWriter(flvWriter.GetWriter(reader.Info()))
 		}
 	} else {
-		writer := NewVirWriter(connServer)
+		writer := NewVirWriter(s.config, connServer)
 		log.Debugf("new player: %+v", writer.Info())
 		s.handler.HandleWriter(writer)
 	}
@@ -199,11 +210,11 @@ type VirWriter struct {
 	WriteBWInfo StaticsBW
 }
 
-func NewVirWriter(conn StreamReadWriteCloser) *VirWriter {
+func NewVirWriter(config *configure.Config, conn StreamReadWriteCloser) *VirWriter {
 	ret := &VirWriter{
 		Uid:         uid.NewId(),
 		conn:        conn,
-		RWBaser:     av.NewRWBaser(time.Second * time.Duration(writeTimeout)),
+		RWBaser:     av.NewRWBaser(time.Second * time.Duration(config.WriteTimeout)),
 		packetQueue: make(chan *av.Packet, maxQueueNum),
 		WriteBWInfo: StaticsBW{0, 0, 0, 0, 0, 0, 0, 0},
 	}
@@ -283,7 +294,6 @@ func (v *VirWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Debug("packet queue len: ", len(pktQue))
 }
 
-//
 func (v *VirWriter) Write(p *av.Packet) (err error) {
 	err = nil
 
@@ -373,11 +383,11 @@ type VirReader struct {
 	ReadBWInfo StaticsBW
 }
 
-func NewVirReader(conn StreamReadWriteCloser) *VirReader {
+func NewVirReader(config *configure.Config, conn StreamReadWriteCloser) *VirReader {
 	return &VirReader{
 		Uid:        uid.NewId(),
 		conn:       conn,
-		RWBaser:    av.NewRWBaser(time.Second * time.Duration(writeTimeout)),
+		RWBaser:    av.NewRWBaser(time.Second * time.Duration(config.ReadTimeout)),
 		demuxer:    flv.NewDemuxer(),
 		ReadBWInfo: StaticsBW{0, 0, 0, 0, 0, 0, 0, 0},
 	}

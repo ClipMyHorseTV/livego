@@ -20,7 +20,7 @@ import (
 var VERSION = "master"
 
 func startHls(config *configure.Config) *hls.Server {
-	hlsAddr := configure.Config.GetString("hls_addr")
+	hlsAddr := config.HLSAddr
 	hlsListen, err := net.Listen("tcp", hlsAddr)
 	if err != nil {
 		log.Fatal(err)
@@ -69,10 +69,10 @@ func startRtmp(config *configure.Config, stream *rtmp.RtmpStream, hlsServer *hls
 	var rtmpServer *rtmp.Server
 
 	if hlsServer == nil {
-		rtmpServer = rtmp.NewRtmpServer(stream, nil)
+		rtmpServer = rtmp.NewRtmpServer(config, stream, nil)
 		log.Info("HLS server disable....")
 	} else {
-		rtmpServer = rtmp.NewRtmpServer(stream, hlsServer)
+		rtmpServer = rtmp.NewRtmpServer(config, stream, hlsServer)
 		log.Info("HLS server enable....")
 	}
 
