@@ -169,10 +169,10 @@ const (
 )
 
 /*
-   +------------------------------+-------------------------
-   |     Event Type ( 2- bytes )  | Event Data
-   +------------------------------+-------------------------
-   Pay load for the ‘User Control Message’.
++------------------------------+-------------------------
+|     Event Type ( 2- bytes )  | Event Data
++------------------------------+-------------------------
+Pay load for the ‘User Control Message’.
 */
 func (conn *Conn) userControlMsg(eventType, buflen uint32) ChunkStream {
 	var ret ChunkStream

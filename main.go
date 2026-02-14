@@ -19,7 +19,7 @@ import (
 
 var VERSION = "master"
 
-func startHls() *hls.Server {
+func startHls(config *configure.Config) *hls.Server {
 	hlsAddr := configure.Config.GetString("hls_addr")
 	hlsListen, err := net.Listen("tcp", hlsAddr)
 	if err != nil {
@@ -39,14 +39,14 @@ func startHls() *hls.Server {
 	return hlsServer
 }
 
-func startRtmp(stream *rtmp.RtmpStream, hlsServer *hls.Server) {
-	rtmpAddr := configure.Config.GetString("rtmp_addr")
-	isRtmps := configure.Config.GetBool("enable_rtmps")
+func startRtmp(config *configure.Config, stream *rtmp.RtmpStream, hlsServer *hls.Server) {
+	rtmpAddr := config.RTMPAddr
+	isRtmps := config.IsRTMPS
 
 	var rtmpListen net.Listener
 	if isRtmps {
-		certPath := configure.Config.GetString("rtmps_cert")
-		keyPath := configure.Config.GetString("rtmps_key")
+		certPath := config.RTMPSCert
+		keyPath := config.RTMPSKey
 		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 		if err != nil {
 			log.Fatal(err)
@@ -89,8 +89,8 @@ func startRtmp(stream *rtmp.RtmpStream, hlsServer *hls.Server) {
 	rtmpServer.Serve(rtmpListen)
 }
 
-func startHTTPFlv(stream *rtmp.RtmpStream) {
-	httpflvAddr := configure.Config.GetString("httpflv_addr")
+func startHTTPFlv(config *configure.Config, stream *rtmp.RtmpStream) {
+	httpflvAddr := config.HTTPFLVAddr
 
 	flvListen, err := net.Listen("tcp", httpflvAddr)
 	if err != nil {
@@ -109,9 +109,9 @@ func startHTTPFlv(stream *rtmp.RtmpStream) {
 	}()
 }
 
-func startAPI(stream *rtmp.RtmpStream) {
-	apiAddr := configure.Config.GetString("api_addr")
-	rtmpAddr := configure.Config.GetString("rtmp_addr")
+func startAPI(config *configure.Config, stream *rtmp.RtmpStream) {
+	apiAddr := config.APIAddr
+	rtmpAddr := config.RTMPAddr
 
 	if apiAddr != "" {
 		opListen, err := net.Listen("tcp", apiAddr)
@@ -131,7 +131,7 @@ func startAPI(stream *rtmp.RtmpStream) {
 	}
 }
 
-func init() {
+func main() {
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
@@ -139,9 +139,12 @@ func init() {
 			return fmt.Sprintf("%s()", f.Function), fmt.Sprintf(" %s:%d", filename, f.Line)
 		},
 	})
-}
 
-func main() {
+	config, err := configure.InitConfig("")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("livego panic: ", r)
@@ -158,21 +161,19 @@ func main() {
         version: %s
 	`, VERSION)
 
-	apps := configure.Applications{}
-	configure.Config.UnmarshalKey("server", &apps)
-	for _, app := range apps {
+	for _, app := range config.Server {
 		stream := rtmp.NewRtmpStream()
 		var hlsServer *hls.Server
 		if app.Hls {
-			hlsServer = startHls()
+			hlsServer = startHls(config)
 		}
 		if app.Flv {
-			startHTTPFlv(stream)
+			startHTTPFlv(config, stream)
 		}
 		if app.Api {
-			startAPI(stream)
+			startAPI(config, stream)
 		}
 
-		startRtmp(stream, hlsServer)
+		startRtmp(config, stream, hlsServer)
 	}
 }

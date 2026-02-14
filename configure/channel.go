@@ -13,37 +13,39 @@ import (
 type RoomKeysType struct {
 	redisCli   *redis.Client
 	localCache *cache.Cache
+
+	saveInLocal bool
 }
 
-var RoomKeys = &RoomKeysType{
-	localCache: cache.New(cache.NoExpiration, 0),
-}
-
-var saveInLocal = true
-
-func Init() {
-	saveInLocal = len(Config.GetString("redis_addr")) == 0
-	if saveInLocal {
-		return
+func NewRoomKeys(config *Config) (*RoomKeysType, error) {
+	rk := &RoomKeysType{
+		localCache: cache.New(cache.NoExpiration, 0),
 	}
 
-	RoomKeys.redisCli = redis.NewClient(&redis.Options{
-		Addr:     Config.GetString("redis_addr"),
-		Password: Config.GetString("redis_pwd"),
+	if config.RedisAddr == "" {
+		log.Info("Redis not configured, using local cache")
+		rk.saveInLocal = true
+		return rk, nil
+	}
+
+	rk.redisCli = redis.NewClient(&redis.Options{
+		Addr:     config.RedisAddr,
+		Password: config.RedisPwd,
 		DB:       0,
 	})
 
-	_, err := RoomKeys.redisCli.Ping().Result()
+	_, err := rk.redisCli.Ping().Result()
 	if err != nil {
-		log.Panic("Redis: ", err)
+		return nil, err
 	}
 
 	log.Info("Redis connected")
+	return rk, nil
 }
 
 // set/reset a random key for channel
 func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
-	if !saveInLocal {
+	if !r.saveInLocal {
 		for {
 			key = uid.RandStringRunes(48)
 			if _, err = r.redisCli.Get(key).Result(); err == redis.Nil {
@@ -72,7 +74,7 @@ func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 }
 
 func (r *RoomKeysType) GetKey(channel string) (newKey string, err error) {
-	if !saveInLocal {
+	if !r.saveInLocal {
 		if newKey, err = r.redisCli.Get(channel).Result(); err == redis.Nil {
 			newKey, err = r.SetKey(channel)
 			log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
@@ -93,7 +95,7 @@ func (r *RoomKeysType) GetKey(channel string) (newKey string, err error) {
 }
 
 func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {
-	if !saveInLocal {
+	if !r.saveInLocal {
 		return r.redisCli.Get(key).Result()
 	}
 
@@ -106,7 +108,7 @@ func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {
 }
 
 func (r *RoomKeysType) DeleteChannel(channel string) bool {
-	if !saveInLocal {
+	if !r.saveInLocal {
 		return r.redisCli.Del(channel).Err() != nil
 	}
 
@@ -120,7 +122,7 @@ func (r *RoomKeysType) DeleteChannel(channel string) bool {
 }
 
 func (r *RoomKeysType) DeleteKey(key string) bool {
-	if !saveInLocal {
+	if !r.saveInLocal {
 		return r.redisCli.Del(key).Err() != nil
 	}
 
