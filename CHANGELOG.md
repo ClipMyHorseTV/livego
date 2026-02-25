@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed arena pool returning slices when requested size exceeds bounds
+- replaced arena allocator (pool.go) with sync.Pool for better memory management ([gwuhaolin/livego#34](https://github.com/gwuhaolin/livego/issues/34), [gwuhaolin/livego#84](https://github.com/gwuhaolin/livego/issues/84), [gwuhaolin/livego#163](https://github.com/gwuhaolin/livego/issues/163), [gwuhaolin/livego#175](https://github.com/gwuhaolin/livego/issues/175))
 
 ## [0.0.20]
 
