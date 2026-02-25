@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gwuhaolin/livego/av"
-	"github.com/gwuhaolin/livego/protocol/amf"
-	"github.com/gwuhaolin/livego/utils/pio"
-	"github.com/gwuhaolin/livego/utils/uid"
+	"github.com/ClipMyHorseTV/livego/av"
+	"github.com/ClipMyHorseTV/livego/protocol/amf"
+	"github.com/ClipMyHorseTV/livego/utils/pio"
+	"github.com/ClipMyHorseTV/livego/utils/uid"
 
 	log "github.com/sirupsen/logrus"
 )
