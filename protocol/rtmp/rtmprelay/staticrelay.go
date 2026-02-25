@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/gwuhaolin/livego/av"
-	"github.com/gwuhaolin/livego/configure"
-	"github.com/gwuhaolin/livego/protocol/rtmp/core"
+	"github.com/ClipMyHorseTV/livego/av"
+	"github.com/ClipMyHorseTV/livego/configure"
+	"github.com/ClipMyHorseTV/livego/protocol/rtmp/core"
 
 	log "github.com/sirupsen/logrus"
 )

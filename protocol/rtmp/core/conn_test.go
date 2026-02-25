@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/gwuhaolin/livego/utils/pool"
+	"github.com/ClipMyHorseTV/livego/utils/pool"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -38,7 +38,7 @@ func TestConnReadNormal(t *testing.T) {
 	at.Equal(int(c.TypeID), 9)
 }
 
-//交叉读音视频数据
+// 交叉读音视频数据
 func TestConnCrossReading(t *testing.T) {
 	at := assert.New(t)
 	data1 := make([]byte, 128)

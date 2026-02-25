@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/gwuhaolin/livego/av"
-	"github.com/gwuhaolin/livego/protocol/amf"
-	"github.com/gwuhaolin/livego/protocol/rtmp/core"
+	"github.com/ClipMyHorseTV/livego/av"
+	"github.com/ClipMyHorseTV/livego/protocol/amf"
+	"github.com/ClipMyHorseTV/livego/protocol/rtmp/core"
 
 	log "github.com/sirupsen/logrus"
 )
