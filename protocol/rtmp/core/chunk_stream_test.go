@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ClipMyHorseTV/livego/utils/pool"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -29,7 +27,7 @@ func TestChunkRead1(t *testing.T) {
 		h, _ := rw.ReadUintBE(1)
 		chunkinc.tmpFromat = h >> 6
 		chunkinc.CSID = h & 0x3f
-		chunkinc.readChunk(rw, 128, pool.NewPool())
+		chunkinc.readChunk(rw, 128)
 		if chunkinc.remain == 0 {
 			break
 		}
@@ -57,17 +55,17 @@ func TestChunkRead1(t *testing.T) {
 	h, _ := rw.ReadUintBE(1)
 	chunkinc.tmpFromat = h >> 6
 	chunkinc.CSID = h & 0x3f
-	chunkinc.readChunk(rw, 128, pool.NewPool())
+	chunkinc.readChunk(rw, 128)
 
 	h, _ = rw.ReadUintBE(1)
 	chunkinc.tmpFromat = h >> 6
 	chunkinc.CSID = h & 0x3f
-	chunkinc.readChunk(rw, 128, pool.NewPool())
+	chunkinc.readChunk(rw, 128)
 
 	h, _ = rw.ReadUintBE(1)
 	chunkinc.tmpFromat = h >> 6
 	chunkinc.CSID = h & 0x3f
-	chunkinc.readChunk(rw, 128, pool.NewPool())
+	chunkinc.readChunk(rw, 128)
 
 	at.Equal(int(chunkinc.Length), 307)
 	at.Equal(int(chunkinc.TypeID), 9)

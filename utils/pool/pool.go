@@ -1,24 +1,29 @@
 package pool
 
-type Pool struct {
-	pos int
-	buf []byte
-}
+import "sync"
 
 const maxpoolsize = 500 * 1024
 
-func (pool *Pool) Get(size int) []byte {
-	if maxpoolsize-pool.pos < size {
-		pool.pos = 0
-		pool.buf = make([]byte, maxpoolsize)
-	}
-	b := pool.buf[pool.pos : pool.pos+size]
-	pool.pos += size
-	return b
+var bytePool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, maxpoolsize)
+		return &b
+	},
 }
 
-func NewPool() *Pool {
-	return &Pool{
-		buf: make([]byte, maxpoolsize),
+func Get(size int) []byte {
+	if size > maxpoolsize {
+		return make([]byte, size)
 	}
+	ptr := bytePool.Get().(*[]byte)
+	b := *ptr
+	return b[:size]
+}
+
+func Put(b []byte) {
+	if cap(b) != maxpoolsize {
+		return
+	}
+	b = b[:cap(b)]
+	bytePool.Put(&b)
 }

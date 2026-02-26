@@ -28,7 +28,7 @@ func (chunkStream *ChunkStream) full() bool {
 	return chunkStream.got
 }
 
-func (chunkStream *ChunkStream) new(pool *pool.Pool) {
+func (chunkStream *ChunkStream) new() {
 	chunkStream.got = false
 	chunkStream.index = 0
 	chunkStream.remain = chunkStream.Length
@@ -120,7 +120,7 @@ func (chunkStream *ChunkStream) writeChunk(w *ReadWriter, chunkSize int) error {
 
 }
 
-func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32, pool *pool.Pool) error {
+func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32) error {
 	if chunkStream.remain != 0 && chunkStream.tmpFromat != 3 {
 		return fmt.Errorf("invalid remain = %d", chunkStream.remain)
 	}
@@ -146,7 +146,7 @@ func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32, pool 
 		} else {
 			chunkStream.exted = false
 		}
-		chunkStream.new(pool)
+		chunkStream.new()
 	case 1:
 		chunkStream.Format = chunkStream.tmpFromat
 		timeStamp, _ := r.ReadUintBE(3)
@@ -160,7 +160,7 @@ func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32, pool 
 		}
 		chunkStream.timeDelta = timeStamp
 		chunkStream.Timestamp += timeStamp
-		chunkStream.new(pool)
+		chunkStream.new()
 	case 2:
 		chunkStream.Format = chunkStream.tmpFromat
 		timeStamp, _ := r.ReadUintBE(3)
@@ -172,7 +172,7 @@ func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32, pool 
 		}
 		chunkStream.timeDelta = timeStamp
 		chunkStream.Timestamp += timeStamp
-		chunkStream.new(pool)
+		chunkStream.new()
 	case 3:
 		if chunkStream.remain == 0 {
 			switch chunkStream.Format {
@@ -190,7 +190,7 @@ func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32, pool 
 				}
 				chunkStream.Timestamp += timedet
 			}
-			chunkStream.new(pool)
+			chunkStream.new()
 		} else {
 			if chunkStream.exted {
 				b, err := r.Peek(4)
