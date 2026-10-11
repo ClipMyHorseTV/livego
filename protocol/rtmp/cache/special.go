@@ -1,7 +1,7 @@
 package cache
 
 import (
-	"github.com/gwuhaolin/livego/av"
+	"github.com/ClipMyHorseTV/livego/av"
 )
 
 const (

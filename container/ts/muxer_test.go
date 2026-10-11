@@ -3,7 +3,7 @@ package ts
 import (
 	"testing"
 
-	"github.com/gwuhaolin/livego/av"
+	"github.com/ClipMyHorseTV/livego/av"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,7 +13,7 @@ type TestWriter struct {
 	count int
 }
 
-//Write write p to w.buf
+// Write write p to w.buf
 func (w *TestWriter) Write(p []byte) (int, error) {
 	w.count++
 	w.buf = p

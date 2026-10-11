@@ -5,8 +5,8 @@ import (
 	"net"
 	"time"
 
-	"github.com/gwuhaolin/livego/utils/pio"
-	"github.com/gwuhaolin/livego/utils/pool"
+	"github.com/ClipMyHorseTV/livego/utils/pio"
+	"github.com/ClipMyHorseTV/livego/utils/pool"
 )
 
 const (
@@ -28,7 +28,6 @@ type Conn struct {
 	received            uint32
 	ackReceived         uint32
 	rw                  *ReadWriter
-	pool                *pool.Pool
 	chunks              map[uint32]ChunkStream
 }
 
@@ -39,7 +38,6 @@ func NewConn(c net.Conn, bufferSize int) *Conn {
 		remoteChunkSize:     128,
 		windowAckSize:       2500000,
 		remoteWindowAckSize: 2500000,
-		pool:                pool.NewPool(),
 		rw:                  NewReadWriter(c, bufferSize),
 		chunks:              make(map[uint32]ChunkStream),
 	}
@@ -48,32 +46,35 @@ func NewConn(c net.Conn, bufferSize int) *Conn {
 func (conn *Conn) Read(c *ChunkStream) error {
 	for {
 		h, _ := conn.rw.ReadUintBE(1)
-		// if err != nil {
-		// 	log.Println("read from conn error: ", err)
-		// 	return err
-		// }
 		format := h >> 6
 		csid := h & 0x3f
 		cs, ok := conn.chunks[csid]
 		if !ok {
 			cs = ChunkStream{}
-			conn.chunks[csid] = cs
 		}
 		cs.tmpFromat = format
 		cs.CSID = csid
-		err := cs.readChunk(conn.rw, conn.remoteChunkSize, conn.pool)
+
+		err := cs.readChunk(conn.rw, conn.remoteChunkSize)
 		if err != nil {
 			return err
 		}
 		conn.chunks[csid] = cs
+
 		if cs.full() {
 			*c = cs
+			c.Data = make([]byte, len(cs.Data))
+			copy(c.Data, cs.Data)
+
+			pool.Put(cs.Data)
+			cs.Data = nil
+			conn.chunks[csid] = cs
+
 			break
 		}
 	}
 
 	conn.handleControlMsg(c)
-
 	conn.ack(c.Length)
 
 	return nil

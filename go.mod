@@ -1,4 +1,4 @@
-module github.com/gwuhaolin/livego
+module github.com/ClipMyHorseTV/livego
 
 go 1.13
 

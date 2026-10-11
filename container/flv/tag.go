@@ -3,7 +3,7 @@ package flv
 import (
 	"fmt"
 
-	"github.com/gwuhaolin/livego/av"
+	"github.com/ClipMyHorseTV/livego/av"
 )
 
 type flvTag struct {
@@ -155,6 +155,10 @@ func (tag *Tag) parseAudioHeader(b []byte) (n int, err error) {
 	n++
 	switch tag.mediat.soundFormat {
 	case av.SOUND_AAC:
+		if len(b) < n+1 {
+			err = fmt.Errorf("invalid aac audiodata len=%d", len(b))
+			return
+		}
 		tag.mediat.aacPacketType = b[1]
 		n++
 	}

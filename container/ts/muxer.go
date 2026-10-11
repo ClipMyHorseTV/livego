@@ -3,7 +3,7 @@ package ts
 import (
 	"io"
 
-	"github.com/gwuhaolin/livego/av"
+	"github.com/ClipMyHorseTV/livego/av"
 )
 
 const (
@@ -158,7 +158,7 @@ func (muxer *Muxer) Mux(p *av.Packet, w io.Writer) error {
 	return nil
 }
 
-//PAT return pat data
+// PAT return pat data
 func (muxer *Muxer) PAT() []byte {
 	i := 0
 	remainByte := 0
