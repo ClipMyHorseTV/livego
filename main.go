@@ -19,105 +19,133 @@ import (
 
 var VERSION = "master"
 
-func startHls() *hls.Server {
-	hlsAddr := configure.Config.GetString("hls_addr")
+func startHls(config *configure.HLSConfig) (*hls.Server, error) {
+	hlsAddr := config.Address
 	hlsListen, err := net.Listen("tcp", hlsAddr)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
+
+	// TODO: move this into the struct for the HLS Object
+	// this will allow to also use WaitGroups to ensure the listener closes
+	//
+	// The following is a workaround for the time being, yes I know this is not ideal.
+
+	errCh := make(chan error, 1)
+	defer close(errCh)
 
 	hlsServer := hls.NewServer()
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error("HLS server panic: ", r)
+		log.Infof("Starting HLS listener on addr '%s'", hlsAddr)
+		err := hlsServer.Serve(hlsListen)
+		if err != nil {
+			select {
+			case errCh <- err:
+			default:
 			}
-		}()
-		log.Info("HLS listen On ", hlsAddr)
-		hlsServer.Serve(hlsListen)
+		}
 	}()
-	return hlsServer
+
+	time.Sleep(200 * time.Millisecond) // Workaround: Wait a little bit to see if there are startup errors
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+	}
+
+	return hlsServer, nil
 }
 
-func startRtmp(stream *rtmp.RtmpStream, hlsServer *hls.Server) {
-	rtmpAddr := configure.Config.GetString("rtmp_addr")
-	isRtmps := configure.Config.GetBool("enable_rtmps")
+func startRtmp(config *configure.RTMPConfig, stream *rtmp.RtmpStream, hlsServer *hls.Server) error {
+	rtmpAddr := config.Address
+	isRTMPS := config.RTMPS != nil
 
 	var rtmpListen net.Listener
-	if isRtmps {
-		certPath := configure.Config.GetString("rtmps_cert")
-		keyPath := configure.Config.GetString("rtmps_key")
-		cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if isRTMPS {
+		cert, err := tls.LoadX509KeyPair(config.RTMPS.CertFile, config.RTMPS.KeyFile)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
 
 		rtmpListen, err = tls.Listen("tcp", rtmpAddr, &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		})
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
+
+		log.Infof("Started RTMP(s) listener on '%s'", rtmpAddr)
 	} else {
 		var err error
 		rtmpListen, err = net.Listen("tcp", rtmpAddr)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
+
+		log.Infof("Started RTMP listener on '%s'", rtmpAddr)
 	}
 
-	var rtmpServer *rtmp.Server
-
-	if hlsServer == nil {
-		rtmpServer = rtmp.NewRtmpServer(stream, nil)
-		log.Info("HLS server disable....")
+	rtmpServer, err := rtmp.NewRtmpServer(config, stream, hlsServer)
+	if err != nil {
+		return err
+	}
+	if hlsServer != nil {
+		log.Info("Starting RTMP Server with HLS forwarding")
 	} else {
-		rtmpServer = rtmp.NewRtmpServer(stream, hlsServer)
-		log.Info("HLS server enable....")
+		log.Info("Starting RTMP Server")
 	}
 
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("RTMP server panic: ", r)
-		}
-	}()
-	if isRtmps {
-		log.Info("RTMPS Listen On ", rtmpAddr)
-	} else {
-		log.Info("RTMP Listen On ", rtmpAddr)
-	}
-	rtmpServer.Serve(rtmpListen)
+	return rtmpServer.Serve(rtmpListen)
 }
 
-func startHTTPFlv(stream *rtmp.RtmpStream) {
-	httpflvAddr := configure.Config.GetString("httpflv_addr")
+func startHTTPFlv(config *configure.Config, stream *rtmp.RtmpStream) error {
+	httpflvAddr := config.HTTPFLVAddr
 
 	flvListen, err := net.Listen("tcp", httpflvAddr)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
-	hdlServer := httpflv.NewServer(stream)
+	// TODO: move this into the struct for the HTTP-FLV Object
+	// this will allow to also use WaitGroups to ensure the listener closes
+	//
+	// The following is a workaround for the time being, yes I know this is not ideal.
+
+	errCh := make(chan error, 1)
+	defer close(errCh)
+
+	httpFlvServer := httpflv.NewServer(stream)
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Error("HTTP-FLV server panic: ", r)
+		log.Infof("Starting HTTP-FLV listener on addr '%s'", httpflvAddr)
+		err := httpFlvServer.Serve(flvListen)
+		if err != nil {
+			select {
+			case errCh <- err:
+			default:
 			}
-		}()
-		log.Info("HTTP-FLV listen On ", httpflvAddr)
-		hdlServer.Serve(flvListen)
+		}
 	}()
+
+	time.Sleep(200 * time.Millisecond) // Workaround: Wait a little bit to see if there are startup errors
+	select {
+	case err := <-errCh:
+		return err
+	default:
+	}
+
+	return nil
 }
 
-func startAPI(stream *rtmp.RtmpStream) {
-	apiAddr := configure.Config.GetString("api_addr")
-	rtmpAddr := configure.Config.GetString("rtmp_addr")
+func startAPI(config *configure.Config, stream *rtmp.RtmpStream) {
+	apiAddr := config.APIAddr
+	rtmpAddr := config.RTMPAddr
 
 	if apiAddr != "" {
 		opListen, err := net.Listen("tcp", apiAddr)
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		opServer := api.NewServer(stream, rtmpAddr)
 		go func() {
 			defer func() {
@@ -131,7 +159,12 @@ func startAPI(stream *rtmp.RtmpStream) {
 	}
 }
 
-func init() {
+func main() {
+	config, err := configure.InitConfig("")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	log.SetFormatter(&log.TextFormatter{
 		FullTimestamp: true,
 		CallerPrettyfier: func(f *runtime.Frame) (string, string) {
@@ -139,15 +172,6 @@ func init() {
 			return fmt.Sprintf("%s()", f.Function), fmt.Sprintf(" %s:%d", filename, f.Line)
 		},
 	})
-}
-
-func main() {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("livego panic: ", r)
-			time.Sleep(1 * time.Second)
-		}
-	}()
 
 	log.Infof(`
      _     _            ____       
@@ -158,21 +182,19 @@ func main() {
         version: %s
 	`, VERSION)
 
-	apps := configure.Applications{}
-	configure.Config.UnmarshalKey("server", &apps)
-	for _, app := range apps {
+	for _, app := range config.Server {
 		stream := rtmp.NewRtmpStream()
 		var hlsServer *hls.Server
 		if app.Hls {
-			hlsServer = startHls()
+			hlsServer = startHls(config)
 		}
-		if app.Flv {
-			startHTTPFlv(stream)
+		if app.FLVViaHTTP {
+			startHTTPFlv(config, stream)
 		}
 		if app.Api {
-			startAPI(stream)
+			startAPI(config, stream)
 		}
 
-		startRtmp(stream, hlsServer)
+		startRtmp(config, stream, hlsServer)
 	}
 }

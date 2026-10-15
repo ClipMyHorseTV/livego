@@ -147,7 +147,15 @@ func (writer *FLVWriter) Info() (ret av.Info) {
 	return
 }
 
-type FlvDvr struct{}
+type FlvDvr struct {
+	config *configure.Config
+}
+
+func NewFlvDvr(config *configure.Config) *FlvDvr {
+	return &FlvDvr{
+		config: config,
+	}
+}
 
 func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 	paths := strings.SplitN(info.Key, "/", 2)
@@ -156,7 +164,7 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 		return nil
 	}
 
-	flvDir := configure.Config.GetString("flv_dir")
+	flvDir := f.config.FLVDir
 
 	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0755)
 	if err != nil {

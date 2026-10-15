@@ -19,16 +19,14 @@ const (
 
 var setFrameFrame []byte
 
-func init() {
+func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 	b := bytes.NewBuffer(nil)
 	encoder := &Encoder{}
 	if _, err := encoder.Encode(b, SetDataFrame, AMF0); err != nil {
 		log.Fatal(err)
 	}
 	setFrameFrame = b.Bytes()
-}
 
-func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 	r := bytes.NewReader(p)
 	decoder := &Decoder{}
 	switch flag {
@@ -37,9 +35,9 @@ func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			vv := v.(string)
+			vv := v
 			if vv != SetDataFrame {
 				tmplen := len(setFrameFrame)
 				b := make([]byte, tmplen+len(p))
@@ -55,9 +53,9 @@ func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			vv := v.(string)
+			vv := v
 			if vv == SetDataFrame {
 				p = p[len(setFrameFrame):]
 			}
