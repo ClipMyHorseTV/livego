@@ -77,13 +77,13 @@ func TestConnCrossReading(t *testing.T) {
 	err := conn.Read(&c)
 	at.NoError(err)
 	at.Equal(9, int(c.TypeID))
-	at.Equal(307, len(c.Data))
+	at.Len(c.Data, 307)
 
 	// audio2
 	err = conn.Read(&c)
 	at.NoError(err)
 	at.Equal(8, int(c.TypeID))
-	at.Equal(307, len(c.Data))
+	at.Len(c.Data, 307)
 
 	err = conn.Read(&c)
 	at.Equal(err, io.EOF)
@@ -126,7 +126,7 @@ func TestSetChunksizeForWrite(t *testing.T) {
 	err := conn.Write(&audio)
 	at.NoError(err)
 	conn.Flush()
-	at.Equal(146, len(buf.Bytes()))
+	at.Len(buf.Bytes(), 146)
 
 	buf.Reset()
 	err = conn.Write(&chunk)
@@ -137,7 +137,7 @@ func TestSetChunksizeForWrite(t *testing.T) {
 	err = conn.Write(&audio)
 	at.NoError(err)
 	conn.Flush()
-	at.Equal(145, len(buf.Bytes()))
+	at.Len(buf.Bytes(), 145)
 }
 
 func TestSetChunksize(t *testing.T) {
@@ -168,7 +168,7 @@ func TestSetChunksize(t *testing.T) {
 	at.Equal(9, int(c.TypeID))
 	at.Equal(6, int(c.CSID))
 	at.Equal(1, int(c.StreamID))
-	at.Equal(307, len(c.Data))
+	at.Len(c.Data, 307)
 
 	// 设置chunksize
 	chunkBuf := []byte{
@@ -192,7 +192,7 @@ func TestSetChunksize(t *testing.T) {
 	conn.rw = NewReadWriter(bytes.NewBuffer(data), 1024)
 	err = conn.Read(&c)
 	at.NoError(err)
-	at.Equal(307, len(c.Data))
+	at.Len(c.Data, 307)
 
 	err = conn.Read(&c)
 	at.Equal(err, io.EOF)

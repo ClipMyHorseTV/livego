@@ -261,7 +261,7 @@ func (s *Stream) IsSendStaticPush() bool {
 		if (staticpushObj != nil) && (err == nil) {
 			return true
 			// staticpushObj.WriteAvPacket(&packet)
-			//log.Debugf("SendStaticPush: WriteAvPacket %s ", pushurl)
+			// log.Debugf("SendStaticPush: WriteAvPacket %s ", pushurl)
 		} else {
 			log.Debugf("SendStaticPush GetStaticPushObject %s error", pushurl)
 		}
@@ -345,7 +345,7 @@ func (s *Stream) TransStart() {
 			} else {
 				newPacket := p
 				// writeType := reflect.TypeOf(v.w)
-				//log.Debugf("w.Write: type=%v, %v", writeType, v.w.Info())
+				// log.Debugf("w.Write: type=%v, %v", writeType, v.w.Info())
 				if err = v.w.Write(&newPacket); err != nil {
 					log.Debugf("[%s] write packet error: %v, remove", v.w.Info(), err)
 					s.ws.Delete(key)

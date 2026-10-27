@@ -115,7 +115,7 @@ func TestAmf0Array(t *testing.T) {
 		t.Errorf("amf0 array conversion failed")
 	}
 
-	for i := range len(arr) {
+	for i := range arr {
 		if arr[i] != result[i] {
 			t.Errorf("amf0 array %d comparison failed: %v / %v", i, arr[i], result[i])
 		}
@@ -177,7 +177,7 @@ func TestAmf3Array(t *testing.T) {
 		t.Errorf("amf3 array conversion failed: %+v", res)
 	}
 
-	for i := 0; i < len(arr); i++ {
+	for i := range arr {
 		if arr[i] != result[i] {
 			t.Errorf("amf3 array %d comparison failed: %v / %v", i, arr[i], result[i])
 		}

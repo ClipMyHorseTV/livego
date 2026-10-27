@@ -222,7 +222,7 @@ func (d *Decoder) DecodeAmf3Array(r io.Reader, decodeMarker bool) (result Array,
 		return result, errors.New("amf3 decode: array key is not empty, can't handle associative array")
 	}
 
-	for i := uint32(0); i < refVal; i++ {
+	for range refVal {
 		tmp, err := d.DecodeAmf3(r)
 		if err != nil {
 			return result, fmt.Errorf("amf3 decode: array element could not be decoded: %w", err)
@@ -333,7 +333,7 @@ func (d *Decoder) DecodeAmf3Object(r io.Reader, decodeMarker bool) (result any, 
 
 	var key string
 	var val any
-	var obj Object = make(Object)
+	obj := make(Object)
 
 	// non-externalizable objects have property keys in traits, iterate through them
 	// and add the read values to the object

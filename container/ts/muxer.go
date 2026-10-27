@@ -56,7 +56,6 @@ func (muxer *Muxer) Mux(p *av.Packet, w io.Writer) error {
 	packetBytesLen := len(p.Data) + int(pesHeaderLen)
 
 	for packetBytesLen > 0 {
-
 		if p.IsVideo {
 			muxer.videoCc++
 			if muxer.videoCc > 0xf {
