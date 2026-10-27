@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -12,8 +14,7 @@ import (
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/rtmprelay"
 
-	jwtmiddleware "github.com/auth0/go-jwt-middleware"
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v5"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -82,6 +83,12 @@ func JWTMiddleware(next http.Handler) http.Handler {
 	log.Info("Using JWT middleware")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Let CORS preflight requests through unauthenticated.
+		if r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		var algorithm jwt.SigningMethod
 		if len(configure.Config.GetString("jwt.algorithm")) > 0 {
 			algorithm = jwt.GetSigningMethod(configure.Config.GetString("jwt.algorithm"))
@@ -91,24 +98,48 @@ func JWTMiddleware(next http.Handler) http.Handler {
 			algorithm = jwt.SigningMethodHS256
 		}
 
-		jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
-			Extractor: jwtmiddleware.FromFirst(jwtmiddleware.FromAuthHeader, jwtmiddleware.FromParameter("jwt")),
-			ValidationKeyGetter: func(token *jwt.Token) (any, error) {
-				return []byte(configure.Config.GetString("jwt.secret")), nil
-			},
-			SigningMethod: algorithm,
-			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err string) {
-				res := &Response{
-					w:      w,
-					Status: 403,
-					Data:   err,
-				}
-				res.send()
-			},
-		})
+		if err := validateJWT(r, algorithm); err != nil {
+			res := &Response{
+				w:      w,
+				Status: 403,
+				Data:   err.Error(),
+			}
+			res.send()
+			return
+		}
 
-		jwtMiddleware.HandlerWithNext(w, r, next.ServeHTTP)
+		next.ServeHTTP(w, r)
 	})
+}
+
+// validateJWT checks the token from the Authorization header, or from the "jwt" query parameter
+// if the header is absent, against the configured secret and signing method.
+func validateJWT(r *http.Request, algorithm jwt.SigningMethod) error {
+	tokenString, err := extractJWT(r)
+	if err != nil {
+		return err
+	}
+	if tokenString == "" {
+		return errors.New("required authorization token not found")
+	}
+
+	_, err = jwt.Parse(tokenString, func(*jwt.Token) (any, error) {
+		return []byte(configure.Config.GetString("jwt.secret")), nil
+	}, jwt.WithValidMethods([]string{algorithm.Alg()}))
+	return err
+}
+
+func extractJWT(r *http.Request) (string, error) {
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		return r.URL.Query().Get("jwt"), nil
+	}
+
+	scheme, token, ok := strings.Cut(authHeader, " ")
+	if !ok || !strings.EqualFold(scheme, "bearer") {
+		return "", errors.New("authorization header format must be Bearer {token}")
+	}
+	return token, nil
 }
 
 func (s *Server) Serve(l net.Listener) error {
