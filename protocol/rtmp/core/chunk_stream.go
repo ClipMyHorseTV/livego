@@ -36,7 +36,7 @@ func (chunkStream *ChunkStream) new() {
 }
 
 func (chunkStream *ChunkStream) writeHeader(w *ReadWriter) error {
-	//Chunk Basic Header
+	// Chunk Basic Header
 	h := chunkStream.Format << 6
 	switch {
 	case chunkStream.CSID < 64:
@@ -51,7 +51,7 @@ func (chunkStream *ChunkStream) writeHeader(w *ReadWriter) error {
 		w.WriteUintBE(h, 1)
 		w.WriteUintLE(chunkStream.CSID-64, 2)
 	}
-	//Chunk Message Header
+	// Chunk Message Header
 	ts := chunkStream.Timestamp
 	if chunkStream.Format == 3 {
 		goto END
@@ -73,7 +73,7 @@ func (chunkStream *ChunkStream) writeHeader(w *ReadWriter) error {
 	}
 	w.WriteUintLE(chunkStream.StreamID, 4)
 END:
-	//Extended Timestamp
+	// Extended Timestamp
 	if ts >= 0xffffff {
 		w.WriteUintBE(chunkStream.Timestamp, 4)
 	}
@@ -81,11 +81,10 @@ END:
 }
 
 func (chunkStream *ChunkStream) writeChunk(w *ReadWriter, chunkSize int) error {
-	if chunkStream.TypeID == av.TAG_AUDIO {
+	switch chunkStream.TypeID {
+	case av.TAG_AUDIO:
 		chunkStream.CSID = 4
-	} else if chunkStream.TypeID == av.TAG_VIDEO ||
-		chunkStream.TypeID == av.TAG_SCRIPTDATAAMF0 ||
-		chunkStream.TypeID == av.TAG_SCRIPTDATAAMF3 {
+	case av.TAG_VIDEO, av.TAG_SCRIPTDATAAMF0, av.TAG_SCRIPTDATAAMF3:
 		chunkStream.CSID = 6
 	}
 
@@ -117,7 +116,6 @@ func (chunkStream *ChunkStream) writeChunk(w *ReadWriter, chunkSize int) error {
 	}
 
 	return nil
-
 }
 
 func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32) error {
@@ -206,10 +204,7 @@ func (chunkStream *ChunkStream) readChunk(r *ReadWriter, chunkSize uint32) error
 	default:
 		return fmt.Errorf("invalid format=%d", chunkStream.Format)
 	}
-	size := int(chunkStream.remain)
-	if size > int(chunkSize) {
-		size = int(chunkSize)
-	}
+	size := min(int(chunkStream.remain), int(chunkSize))
 
 	buf := chunkStream.Data[chunkStream.index : chunkStream.index+uint32(size)]
 	if _, err := r.Read(buf); err != nil {

@@ -1,6 +1,7 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ClipMyHorseTV/livego/utils/uid"
@@ -41,21 +42,21 @@ func Init() {
 	log.Info("Redis connected")
 }
 
-// set/reset a random key for channel
+// set/reset a random key for channel.
 func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 	if !saveInLocal {
 		for {
 			key = uid.RandStringRunes(48)
-			if _, err = r.redisCli.Get(key).Result(); err == redis.Nil {
+			if _, err = r.redisCli.Get(key).Result(); errors.Is(err, redis.Nil) {
 				err = r.redisCli.Set(channel, key, 0).Err()
 				if err != nil {
-					return
+					return key, err
 				}
 
 				err = r.redisCli.Set(key, channel, 0).Err()
-				return
+				return key, err
 			} else if err != nil {
-				return
+				return key, err
 			}
 		}
 	}
@@ -68,28 +69,28 @@ func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 			break
 		}
 	}
-	return
+	return key, err
 }
 
 func (r *RoomKeysType) GetKey(channel string) (newKey string, err error) {
 	if !saveInLocal {
-		if newKey, err = r.redisCli.Get(channel).Result(); err == redis.Nil {
+		if newKey, err = r.redisCli.Get(channel).Result(); errors.Is(err, redis.Nil) {
 			newKey, err = r.SetKey(channel)
 			log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
-			return
+			return newKey, err
 		}
 
-		return
+		return newKey, err
 	}
 
-	var key interface{}
+	var key any
 	var found bool
 	if key, found = r.localCache.Get(channel); found {
 		return key.(string), nil
 	}
 	newKey, err = r.SetKey(channel)
 	log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
-	return
+	return newKey, err
 }
 
 func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {

@@ -37,7 +37,6 @@ func (cache *Cache) Write(p av.Packet) {
 					return
 				}
 			}
-
 		} else {
 			vh, ok := p.Header.(av.VideoPacketHeader)
 			if ok {
@@ -48,7 +47,6 @@ func (cache *Cache) Write(p av.Packet) {
 			} else {
 				return
 			}
-
 		}
 	}
 	cache.gop.Write(&p)

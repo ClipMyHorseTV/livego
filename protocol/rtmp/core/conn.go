@@ -21,6 +21,7 @@ const (
 
 type Conn struct {
 	net.Conn
+
 	chunkSize           uint32
 	remoteChunkSize     uint32
 	windowAckSize       uint32
@@ -126,9 +127,10 @@ func (conn *Conn) NewSetPeerBandwidth(size uint32) ChunkStream {
 }
 
 func (conn *Conn) handleControlMsg(c *ChunkStream) {
-	if c.TypeID == idSetChunkSize {
+	switch c.TypeID {
+	case idSetChunkSize:
 		conn.remoteChunkSize = binary.BigEndian.Uint32(c.Data)
-	} else if c.TypeID == idWindowAckSize {
+	case idWindowAckSize:
 		conn.remoteWindowAckSize = binary.BigEndian.Uint32(c.Data)
 	}
 }
@@ -193,7 +195,7 @@ func (conn *Conn) userControlMsg(eventType, buflen uint32) ChunkStream {
 
 func (conn *Conn) SetBegin() {
 	ret := conn.userControlMsg(streamBegin, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		ret.Data[2+i] = byte(1 >> uint32((3-i)*8) & 0xff)
 	}
 	conn.Write(&ret)
@@ -201,7 +203,7 @@ func (conn *Conn) SetBegin() {
 
 func (conn *Conn) SetRecorded() {
 	ret := conn.userControlMsg(streamIsRecorded, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		ret.Data[2+i] = byte(1 >> uint32((3-i)*8) & 0xff)
 	}
 	conn.Write(&ret)

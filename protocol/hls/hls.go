@@ -1,6 +1,7 @@
 package hls
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,10 +23,10 @@ const (
 )
 
 var (
-	ErrNoPublisher         = fmt.Errorf("no publisher")
-	ErrInvalidReq          = fmt.Errorf("invalid req url path")
-	ErrNoSupportVideoCodec = fmt.Errorf("no support video codec")
-	ErrNoSupportAudioCodec = fmt.Errorf("no support audio codec")
+	ErrNoPublisher         = errors.New("no publisher")
+	ErrInvalidReq          = errors.New("invalid req url path")
+	ErrNoSupportVideoCodec = errors.New("no support video codec")
+	ErrNoSupportAudioCodec = errors.New("no support audio codec")
 )
 
 var crossdomainxml = []byte(`<?xml version="1.0" ?>
@@ -88,7 +89,7 @@ func (server *Server) checkStop() {
 	for {
 		<-time.After(5 * time.Second)
 
-		server.conns.Range(func(key, val interface{}) bool {
+		server.conns.Range(func(key, val any) bool {
 			v := val.(*Source)
 			if !v.Alive() && !configure.Config.GetBool("hls_keep_after_end") {
 				log.Debug("check stop and remove: ", v.Info())
@@ -154,7 +155,7 @@ func (server *Server) handle(w http.ResponseWriter, r *http.Request) {
 func (server *Server) parseM3u8(pathstr string) (key string, err error) {
 	pathstr = strings.TrimLeft(pathstr, "/")
 	key = strings.Split(pathstr, path.Ext(pathstr))[0]
-	return
+	return key, err
 }
 
 func (server *Server) parseTs(pathstr string) (key string, err error) {
@@ -162,9 +163,9 @@ func (server *Server) parseTs(pathstr string) (key string, err error) {
 	paths := strings.SplitN(pathstr, "/", 3)
 	if len(paths) != 3 {
 		err = fmt.Errorf("invalid path=%s", pathstr)
-		return
+		return key, err
 	}
 	key = paths[0] + "/" + paths[1]
 
-	return
+	return key, err
 }

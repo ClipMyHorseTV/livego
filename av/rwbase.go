@@ -26,11 +26,7 @@ func (rw *RWBaser) BaseTimeStamp() uint32 {
 }
 
 func (rw *RWBaser) CalcBaseTimestamp() {
-	if rw.LastAudioTimestamp > rw.LastVideoTimestamp {
-		rw.BaseTimestamp = rw.LastAudioTimestamp
-	} else {
-		rw.BaseTimestamp = rw.LastVideoTimestamp
-	}
+	rw.BaseTimestamp = max(rw.LastAudioTimestamp, rw.LastVideoTimestamp)
 }
 
 func (rw *RWBaser) RecTimeStamp(timestamp, typeID uint32) {

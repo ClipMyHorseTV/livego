@@ -33,11 +33,11 @@ func TestChunkRead1(t *testing.T) {
 		}
 	}
 
-	at.Equal(int(chunkinc.Length), 307)
-	at.Equal(int(chunkinc.TypeID), 9)
-	at.Equal(int(chunkinc.StreamID), 1)
-	at.Equal(len(chunkinc.Data), 307)
-	at.Equal(int(chunkinc.remain), 0)
+	at.Equal(307, int(chunkinc.Length))
+	at.Equal(9, int(chunkinc.TypeID))
+	at.Equal(1, int(chunkinc.StreamID))
+	at.Equal(307, len(chunkinc.Data))
+	at.Equal(0, int(chunkinc.remain))
 
 	data = []byte{
 		0x06, 0xff, 0xff, 0xff, 0x00, 0x01, 0x33, 0x09, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05,
@@ -67,14 +67,13 @@ func TestChunkRead1(t *testing.T) {
 	chunkinc.CSID = h & 0x3f
 	chunkinc.readChunk(rw, 128)
 
-	at.Equal(int(chunkinc.Length), 307)
-	at.Equal(int(chunkinc.TypeID), 9)
-	at.Equal(int(chunkinc.StreamID), 1)
-	at.Equal(len(chunkinc.Data), 307)
-	at.Equal(chunkinc.exted, true)
-	at.Equal(int(chunkinc.Timestamp), 5)
-	at.Equal(int(chunkinc.remain), 0)
-
+	at.Equal(307, int(chunkinc.Length))
+	at.Equal(9, int(chunkinc.TypeID))
+	at.Equal(1, int(chunkinc.StreamID))
+	at.Equal(307, len(chunkinc.Data))
+	at.True(chunkinc.exted)
+	at.Equal(5, int(chunkinc.Timestamp))
+	at.Equal(0, int(chunkinc.remain))
 }
 
 func TestWriteChunk(t *testing.T) {
@@ -91,6 +90,6 @@ func TestWriteChunk(t *testing.T) {
 	w := NewReadWriter(bf, 1024)
 	err := chunkinc.writeChunk(w, 128)
 	w.Flush()
-	at.Equal(err, nil)
-	at.Equal(len(bf.Bytes()), 321)
+	at.NoError(err)
+	at.Equal(321, len(bf.Bytes()))
 }

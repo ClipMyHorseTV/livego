@@ -1,14 +1,14 @@
 package cache
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/ClipMyHorseTV/livego/av"
 )
 
 var (
 	maxGOPCap    int = 1024
-	ErrGopTooBig     = fmt.Errorf("gop to big")
+	ErrGopTooBig     = errors.New("gop to big")
 )
 
 type array struct {
@@ -40,7 +40,7 @@ func (array *array) write(packet *av.Packet) error {
 
 func (array *array) send(w av.WriteCloser) error {
 	var err error
-	for i := 0; i < array.index; i++ {
+	for i := range array.index {
 		packet := array.packets[i]
 		if err = w.Write(packet); err != nil {
 			return err
@@ -101,7 +101,7 @@ func (gopCache *GopCache) Write(p *av.Packet) {
 func (gopCache *GopCache) sendTo(w av.WriteCloser) error {
 	var err error
 	pos := (gopCache.nextindex + 1) % gopCache.count
-	for i := 0; i < gopCache.num; i++ {
+	for i := range gopCache.num {
 		index := (pos - gopCache.num + 1) + i
 		if index < 0 {
 			index += gopCache.count

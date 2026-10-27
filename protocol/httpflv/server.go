@@ -46,7 +46,7 @@ func (server *Server) Serve(l net.Listener) error {
 	return nil
 }
 
-// 获取发布和播放器的信息
+// 获取发布和播放器的信息.
 func (server *Server) getStreams(w http.ResponseWriter, r *http.Request) *streams {
 	rtmpStream := server.handler.(*rtmp.RtmpStream)
 	if rtmpStream == nil {
@@ -54,7 +54,7 @@ func (server *Server) getStreams(w http.ResponseWriter, r *http.Request) *stream
 	}
 	msgs := new(streams)
 
-	rtmpStream.GetStreams().Range(func(key, val interface{}) bool {
+	rtmpStream.GetStreams().Range(func(key, val any) bool {
 		if s, ok := val.(*rtmp.Stream); ok {
 			if s.GetReader() != nil {
 				msg := stream{key.(string), s.GetReader().Info().UID}
@@ -64,10 +64,10 @@ func (server *Server) getStreams(w http.ResponseWriter, r *http.Request) *stream
 		return true
 	})
 
-	rtmpStream.GetStreams().Range(func(key, val interface{}) bool {
+	rtmpStream.GetStreams().Range(func(key, val any) bool {
 		ws := val.(*rtmp.Stream).GetWs()
 
-		ws.Range(func(k, v interface{}) bool {
+		ws.Range(func(k, v any) bool {
 			if pw, ok := v.(*rtmp.PackWriterCloser); ok {
 				if pw.GetWriter() != nil {
 					msg := stream{key.(string), pw.GetWriter().Info().UID}
@@ -127,7 +127,7 @@ func (server *Server) handleConn(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
-		if include == false {
+		if !include {
 			http.Error(w, "invalid path", http.StatusNotFound)
 			return
 		}

@@ -1,6 +1,7 @@
 package httpflv
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -57,14 +58,13 @@ func NewFLVWriter(app, title, url string, ctx http.ResponseWriter) *FLVWriter {
 			log.Debug("SendPacket error: ", err)
 			ret.closed = true
 		}
-
 	}()
 	return ret
 }
 
 func (flvWriter *FLVWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Warningf("[%v] packet queue max!!!", info)
-	for i := 0; i < maxQueueNum-84; i++ {
+	for range maxQueueNum - 84 {
 		tmpPkt, ok := <-pktQue
 		if ok && tmpPkt.IsVideo {
 			videoPkt, ok := tmpPkt.Header.(av.VideoPacketHeader)
@@ -92,8 +92,8 @@ func (flvWriter *FLVWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 func (flvWriter *FLVWriter) Write(p *av.Packet) (err error) {
 	err = nil
 	if flvWriter.closed {
-		err = fmt.Errorf("flvwrite source closed")
-		return
+		err = errors.New("flvwrite source closed")
+		return err
 	}
 
 	defer func() {
@@ -108,7 +108,7 @@ func (flvWriter *FLVWriter) Write(p *av.Packet) (err error) {
 		flvWriter.packetQueue <- p
 	}
 
-	return
+	return err
 }
 
 func (flvWriter *FLVWriter) SendPacket() error {
@@ -157,9 +157,8 @@ func (flvWriter *FLVWriter) SendPacket() error {
 				return err
 			}
 		} else {
-			return fmt.Errorf("closed")
+			return errors.New("closed")
 		}
-
 	}
 }
 
@@ -184,5 +183,5 @@ func (flvWriter *FLVWriter) Info() (ret av.Info) {
 	ret.URL = flvWriter.url
 	ret.Key = flvWriter.app + "/" + flvWriter.title
 	ret.Inter = true
-	return
+	return ret
 }

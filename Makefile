@@ -27,6 +27,7 @@ lint:
 .PHONY: fmt
 fmt:
 	$(GOBIN)/golangci-lint fmt ./...
+	$(GOBIN)/golangci-lint run --fix ./...
 
 .PHONY: install-dev
 install-dev:

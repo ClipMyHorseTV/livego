@@ -1,7 +1,7 @@
 package aac
 
 import (
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -26,8 +26,8 @@ type mpegCfgInfo struct {
 var aacRates = []int{96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350}
 
 var (
-	specificBufInvalid = fmt.Errorf("audio mpegspecific error")
-	audioBufInvalid    = fmt.Errorf("audiodata  invalid")
+	specificBufInvalid = errors.New("audio mpegspecific error")
+	audioBufInvalid    = errors.New("audiodata  invalid")
 )
 
 const (
@@ -66,13 +66,13 @@ func (parser *Parser) adts(src []byte, w io.Writer) error {
 
 	frameLen := uint16(len(src)) + 7
 
-	//first write adts header
+	// first write adts header
 	parser.adtsHeader[0] = 0xff
 	parser.adtsHeader[1] = 0xf1
 
 	parser.adtsHeader[2] &= 0x00
 	parser.adtsHeader[2] = parser.adtsHeader[2] | (parser.cfgInfo.objectType-1)<<6
-	parser.adtsHeader[2] = parser.adtsHeader[2] | (parser.cfgInfo.sampleRate)<<2
+	parser.adtsHeader[2] = parser.adtsHeader[2] | parser.cfgInfo.sampleRate<<2
 
 	parser.adtsHeader[3] &= 0x00
 	parser.adtsHeader[3] = parser.adtsHeader[3] | (parser.cfgInfo.channel<<2)<<4
@@ -110,5 +110,5 @@ func (parser *Parser) Parse(b []byte, packetType uint8, w io.Writer) (err error)
 	case av.AAC_RAW:
 		err = parser.adts(b, w)
 	}
-	return
+	return err
 }

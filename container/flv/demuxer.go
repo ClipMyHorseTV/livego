@@ -1,17 +1,14 @@
 package flv
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/ClipMyHorseTV/livego/av"
 )
 
-var (
-	ErrAvcEndSEQ = fmt.Errorf("avc end sequence")
-)
+var ErrAvcEndSEQ = errors.New("avc end sequence")
 
-type Demuxer struct {
-}
+type Demuxer struct{}
 
 func NewDemuxer() *Demuxer {
 	return &Demuxer{}

@@ -1,6 +1,7 @@
 package rtmp
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -45,11 +46,12 @@ func (c *Client) Dial(url string, method string) error {
 	if err := connClient.Start(url, method); err != nil {
 		return err
 	}
-	if method == av.PUBLISH {
+	switch method {
+	case av.PUBLISH:
 		writer := NewVirWriter(connClient)
 		log.Debugf("client Dial call NewVirWriter url=%s, method=%s", url, method)
 		c.handler.HandleWriter(writer)
-	} else if method == av.PLAY {
+	case av.PLAY:
 		reader := NewVirReader(connClient)
 		log.Debugf("client Dial call NewVirReader url=%s, method=%s", url, method)
 		c.handler.HandleReader(reader)
@@ -88,7 +90,7 @@ func (s *Server) Serve(listener net.Listener) (err error) {
 		var netconn net.Conn
 		netconn, err = listener.Accept()
 		if err != nil {
-			return
+			return err
 		}
 		conn := core.NewConn(netconn, 4*1024)
 		log.Debug("new client, connect remote: ", conn.RemoteAddr().String(),
@@ -254,7 +256,7 @@ func (v *VirWriter) Check() {
 
 func (v *VirWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Warningf("[%v] packet queue max!!!", info)
-	for i := 0; i < maxQueueNum-84; i++ {
+	for range maxQueueNum - 84 {
 		tmpPkt, ok := <-pktQue
 		// try to don't drop audio
 		if ok && tmpPkt.IsAudio {
@@ -264,7 +266,6 @@ func (v *VirWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 			} else {
 				pktQue <- tmpPkt
 			}
-
 		}
 
 		if ok && tmpPkt.IsVideo {
@@ -278,7 +279,6 @@ func (v *VirWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 				<-pktQue
 			}
 		}
-
 	}
 	log.Debug("packet queue len: ", len(pktQue))
 }
@@ -287,8 +287,8 @@ func (v *VirWriter) Write(p *av.Packet) (err error) {
 	err = nil
 
 	if v.closed {
-		err = fmt.Errorf("VirWriter closed")
-		return
+		err = errors.New("VirWriter closed")
+		return err
 	}
 	defer func() {
 		if e := recover(); e != nil {
@@ -301,7 +301,7 @@ func (v *VirWriter) Write(p *av.Packet) (err error) {
 		v.packetQueue <- p
 	}
 
-	return
+	return err
 }
 
 func (v *VirWriter) SendPacket() error {
@@ -336,9 +336,8 @@ func (v *VirWriter) SendPacket() error {
 			}
 			Flush.Call(nil)
 		} else {
-			return fmt.Errorf("closed")
+			return errors.New("closed")
 		}
-
 	}
 }
 
@@ -352,7 +351,7 @@ func (v *VirWriter) Info() (ret av.Info) {
 	}
 	ret.Key = strings.TrimLeft(_url.Path, "/")
 	ret.Inter = true
-	return
+	return ret
 }
 
 func (v *VirWriter) Close(err error) {
@@ -397,7 +396,7 @@ func (v *VirReader) SaveStatics(streamid uint32, length uint64, isVideoFlag bool
 	} else if (nowInMS - v.ReadBWInfo.LastTimestamp) >= SAVE_STATICS_INTERVAL {
 		diffTimestamp := (nowInMS - v.ReadBWInfo.LastTimestamp) / 1000
 
-		//log.Printf("now=%d, last=%d, diff=%d", nowInMS, v.ReadBWInfo.LastTimestamp, diffTimestamp)
+		// log.Printf("now=%d, last=%d, diff=%d", nowInMS, v.ReadBWInfo.LastTimestamp, diffTimestamp)
 		v.ReadBWInfo.VideoSpeedInBytesperMS = (v.ReadBWInfo.VideoDatainBytes - v.ReadBWInfo.LastVideoDatainBytes) * 8 / uint64(diffTimestamp) / 1000
 		v.ReadBWInfo.AudioSpeedInBytesperMS = (v.ReadBWInfo.AudioDatainBytes - v.ReadBWInfo.LastAudioDatainBytes) * 8 / uint64(diffTimestamp) / 1000
 
@@ -450,7 +449,7 @@ func (v *VirReader) Info() (ret av.Info) {
 		log.Warning(err)
 	}
 	ret.Key = strings.TrimLeft(_url.Path, "/")
-	return
+	return ret
 }
 
 func (v *VirReader) Close(err error) {

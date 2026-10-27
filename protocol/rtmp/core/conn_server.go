@@ -2,7 +2,7 @@ package core
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -17,9 +17,7 @@ var (
 	publishAppend = "append"
 )
 
-var (
-	ErrReq = fmt.Errorf("req error")
-)
+var ErrReq = errors.New("req error")
 
 var (
 	cmdConnect       = "connect"
@@ -33,15 +31,15 @@ var (
 )
 
 type ConnectInfo struct {
-	App            string `amf:"app" json:"app"`
-	Flashver       string `amf:"flashVer" json:"flashVer"`
-	SwfUrl         string `amf:"swfUrl" json:"swfUrl"`
-	TcUrl          string `amf:"tcUrl" json:"tcUrl"`
-	Fpad           bool   `amf:"fpad" json:"fpad"`
-	AudioCodecs    int    `amf:"audioCodecs" json:"audioCodecs"`
-	VideoCodecs    int    `amf:"videoCodecs" json:"videoCodecs"`
-	VideoFunction  int    `amf:"videoFunction" json:"videoFunction"`
-	PageUrl        string `amf:"pageUrl" json:"pageUrl"`
+	App            string `amf:"app"            json:"app"`
+	Flashver       string `amf:"flashVer"       json:"flashVer"`
+	SwfUrl         string `amf:"swfUrl"         json:"swfUrl"`
+	TcUrl          string `amf:"tcUrl"          json:"tcUrl"`
+	Fpad           bool   `amf:"fpad"           json:"fpad"`
+	AudioCodecs    int    `amf:"audioCodecs"    json:"audioCodecs"`
+	VideoCodecs    int    `amf:"videoCodecs"    json:"videoCodecs"`
+	VideoFunction  int    `amf:"videoFunction"  json:"videoFunction"`
+	PageUrl        string `amf:"pageUrl"        json:"pageUrl"`
 	ObjectEncoding int    `amf:"objectEncoding" json:"objectEncoding"`
 }
 
@@ -85,7 +83,7 @@ func NewConnServer(conn *Conn) *ConnServer {
 	}
 }
 
-func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...interface{}) error {
+func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...any) error {
 	connServer.bytesw.Reset()
 	for _, v := range args {
 		if _, err := connServer.encoder.Encode(connServer.bytesw, v, amf.AMF0); err != nil {
@@ -106,7 +104,7 @@ func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...interface{
 	return connServer.conn.Flush()
 }
 
-func (connServer *ConnServer) connect(vs []interface{}) error {
+func (connServer *ConnServer) connect(vs []any) error {
 	for _, v := range vs {
 		switch v.(type) {
 		case string:
@@ -135,11 +133,11 @@ func (connServer *ConnServer) connect(vs []interface{}) error {
 	return nil
 }
 
-func (connServer *ConnServer) releaseStream(vs []interface{}) error {
+func (connServer *ConnServer) releaseStream(vs []any) error {
 	return nil
 }
 
-func (connServer *ConnServer) fcPublish(vs []interface{}) error {
+func (connServer *ConnServer) fcPublish(vs []any) error {
 	return nil
 }
 
@@ -163,12 +161,12 @@ func (connServer *ConnServer) connectResp(cur *ChunkStream) error {
 	return connServer.writeMsg(cur.CSID, cur.StreamID, "_result", connServer.transactionID, resp, event)
 }
 
-func (connServer *ConnServer) createStream(vs []interface{}) error {
+func (connServer *ConnServer) createStream(vs []any) error {
 	for _, v := range vs {
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
 		case float64:
-			connServer.transactionID = int(v.(float64))
+			connServer.transactionID = int(v)
 		case amf.Object:
 		}
 	}
@@ -179,17 +177,18 @@ func (connServer *ConnServer) createStreamResp(cur *ChunkStream) error {
 	return connServer.writeMsg(cur.CSID, cur.StreamID, "_result", connServer.transactionID, nil, connServer.streamID)
 }
 
-func (connServer *ConnServer) publishOrPlay(vs []interface{}) error {
+func (connServer *ConnServer) publishOrPlay(vs []any) error {
 	for k, v := range vs {
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			if k == 2 {
-				connServer.PublishInfo.Name = v.(string)
-			} else if k == 3 {
-				connServer.PublishInfo.Type = v.(string)
+			switch k {
+			case 2:
+				connServer.PublishInfo.Name = v
+			case 3:
+				connServer.PublishInfo.Type = v
 			}
 		case float64:
-			id := int(v.(float64))
+			id := int(v)
 			connServer.transactionID = id
 		case amf.Object:
 		}
@@ -248,7 +247,7 @@ func (connServer *ConnServer) handleCmdMsg(c *ChunkStream) error {
 	}
 	r := bytes.NewReader(c.Data)
 	vs, err := connServer.decoder.DecodeBatch(r, amf.Version(amfType))
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	// log.Debugf("rtmp req: %#v", vs)
@@ -350,7 +349,7 @@ func (connServer *ConnServer) GetInfo() (app string, name string, url string) {
 	app = connServer.ConnInfo.App
 	name = connServer.PublishInfo.Name
 	url = connServer.ConnInfo.TcUrl + "/" + connServer.PublishInfo.Name
-	return
+	return app, name, url
 }
 
 func (connServer *ConnServer) Close(err error) {

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func EncodeAndDecode(val interface{}, ver Version) (result interface{}, err error) {
+func EncodeAndDecode(val any, ver Version) (result any, err error) {
 	enc := new(Encoder)
 	dec := new(Decoder)
 
@@ -16,18 +16,18 @@ func EncodeAndDecode(val interface{}, ver Version) (result interface{}, err erro
 
 	_, err = enc.Encode(buf, val, ver)
 	if err != nil {
-		return nil, fmt.Errorf("error in encode: %s", err)
+		return nil, fmt.Errorf("error in encode: %w", err)
 	}
 
 	result, err = dec.Decode(buf, ver)
 	if err != nil {
-		return nil, fmt.Errorf("error in decode: %s", err)
+		return nil, fmt.Errorf("error in decode: %w", err)
 	}
 
-	return
+	return result, err
 }
 
-func Compare(val interface{}, ver Version, name string, t *testing.T) {
+func Compare(val any, ver Version, name string, t *testing.T) {
 	result, err := EncodeAndDecode(val, ver)
 	if err != nil {
 		t.Errorf("%s: %s", name, err)
@@ -115,7 +115,7 @@ func TestAmf0Array(t *testing.T) {
 		t.Errorf("amf0 array conversion failed")
 	}
 
-	for i := 0; i < len(arr); i++ {
+	for i := range len(arr) {
 		if arr[i] != result[i] {
 			t.Errorf("amf0 array %d comparison failed: %v / %v", i, arr[i], result[i])
 		}
@@ -199,7 +199,7 @@ func TestAmf3ByteArray(t *testing.T) {
 		t.Errorf("err: %s", err)
 	}
 
-	if bytes.Compare(result, expect) != 0 {
+	if !bytes.Equal(result, expect) {
 		t.Errorf("expected: %+v, got %+v", expect, buf)
 	}
 }

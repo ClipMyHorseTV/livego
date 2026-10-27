@@ -2,6 +2,7 @@ package hls
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,6 +26,7 @@ const (
 
 type Source struct {
 	av.RWBaser
+
 	seq         int
 	info        av.Info
 	bwriter     *bytes.Buffer
@@ -72,7 +74,7 @@ func (source *Source) GetCacheInc() *TSCacheItem {
 
 func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Warningf("[%v] packet queue max!!!", info)
-	for i := 0; i < maxQueueNum-84; i++ {
+	for range maxQueueNum - 84 {
 		tmpPkt, ok := <-pktQue
 		// try to don't drop audio
 		if ok && tmpPkt.IsAudio {
@@ -93,7 +95,6 @@ func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 				<-pktQue
 			}
 		}
-
 	}
 	log.Debug("packet queue len: ", len(pktQue))
 }
@@ -101,8 +102,8 @@ func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 func (source *Source) Write(p *av.Packet) (err error) {
 	err = nil
 	if source.closed {
-		err = fmt.Errorf("hls source closed")
-		return
+		err = errors.New("hls source closed")
+		return err
 	}
 	source.SetPreTime()
 	defer func() {
@@ -117,7 +118,7 @@ func (source *Source) Write(p *av.Packet) (err error) {
 			source.packetQueue <- p
 		}
 	}
-	return
+	return err
 }
 
 func (source *Source) SendPacket() error {
@@ -131,7 +132,7 @@ func (source *Source) SendPacket() error {
 	log.Debugf("[%v] hls sender start", source.info)
 	for {
 		if source.closed {
-			return fmt.Errorf("closed")
+			return errors.New("closed")
 		}
 
 		p, ok := <-source.packetQueue
@@ -141,7 +142,7 @@ func (source *Source) SendPacket() error {
 			}
 
 			err := source.demuxer.Demux(p)
-			if err == flv.ErrAvcEndSEQ {
+			if errors.Is(err, flv.ErrAvcEndSEQ) {
 				log.Warning(err)
 				continue
 			} else {
@@ -163,7 +164,7 @@ func (source *Source) SendPacket() error {
 				source.tsMux(p)
 			}
 		} else {
-			return fmt.Errorf("closed")
+			return errors.New("closed")
 		}
 	}
 }
@@ -255,6 +256,7 @@ func (source *Source) calcPtsDts(isVideo bool, ts, compositionTs uint32) {
 		source.pts = source.dts
 	}
 }
+
 func (source *Source) flushAudio() error {
 	return source.muxAudio(1)
 }

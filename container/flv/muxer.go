@@ -16,9 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var (
-	flvHeader = []byte{0x46, 0x4c, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09}
-)
+var flvHeader = []byte{0x46, 0x4c, 0x56, 0x01, 0x05, 0x00, 0x00, 0x00, 0x09}
 
 /*
 func NewFlv(handler av.Handler, info av.Info) {
@@ -144,7 +142,7 @@ func (writer *FLVWriter) Info() (ret av.Info) {
 	ret.UID = writer.Uid
 	ret.URL = writer.url
 	ret.Key = writer.app + "/" + writer.title
-	return
+	return ret
 }
 
 type FlvDvr struct{}
@@ -158,7 +156,7 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 
 	flvDir := configure.Config.GetString("flv_dir")
 
-	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0755)
+	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0o755)
 	if err != nil {
 		log.Error("mkdir error: ", err)
 		return nil
@@ -166,7 +164,7 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 
 	fileName := fmt.Sprintf("%s_%d.%s", path.Join(flvDir, info.Key), time.Now().Unix(), "flv")
 	log.Debug("flv dvr save stream to: ", fileName)
-	w, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0755)
+	w, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
 		log.Error("open file error: ", err)
 		return nil
