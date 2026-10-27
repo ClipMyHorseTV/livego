@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - golangci-lint config (`.golangci.yaml`).
 - `make lint`, `make fmt` and `make install-dev` targets.
 - `core.MessageLength` to validate RTMP message lengths.
+- Dependency review workflow for pull requests.
+- Tests for the API JWT middleware.
 
 ### Changed
 
@@ -22,7 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `flv.NewFLVWriter` now returns an error.
 - **Breaking:** `Conn.SetBegin` and `Conn.SetRecorded` now return an error.
 - **Breaking:** API and HLS `Serve` now return the server error.
+- **Breaking:** API 403 responses now carry `golang-jwt` error messages
+  (e.g. `token has invalid claims: token is expired`).
 - Replaced `satori/go.uuid` with `google/uuid`.
+- Replaced `dgrijalva/jwt-go` and `auth0/go-jwt-middleware` with `golang-jwt/jwt/v5`.
+- CodeQL actions bumped from v3 to v4.
 - Stream keys are generated with `crypto/rand`.
 - HTTP servers set a 10s `ReadHeaderTimeout`.
 - FLV recordings are created with `0600`, folders with `0750`.
@@ -40,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AMF3 dynamic objects wrote the end marker after every member.
 - AMF0 ECMA array length errors were ignored.
 - Chunk size 0 caused a division by zero.
+- The API JWT middleware now rejects tokens with an unexpected algorithm before verifying them.
+- Vulnerable dependencies: `golang.org/x/text` (0.3.2 → 0.22.0), `golang.org/x/sys`
+  (2019 → 0.30.0) and `gopkg.in/yaml.v2` (2.2.4 → 2.4.0).
+- `dgrijalva/jwt-go` access restriction bypass (GO-2020-0017), fixed by the switch to `golang-jwt`.
 
 ### Removed
 
