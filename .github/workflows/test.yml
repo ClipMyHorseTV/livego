@@ -31,6 +31,11 @@ jobs:
           go-version-file: ${{ matrix.go-version-file }}
       - name: Test
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Coverage summary
+        if: matrix.name == 'stable'
+        run: |
+          echo '### Coverage' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | awk '/^total:/ {print "Total: **" $NF "**"}' >> "$GITHUB_STEP_SUMMARY"
       - name: Annotate coverage
         if: matrix.name == 'stable' && github.event_name == 'pull_request'
         uses: ggilder/codecoverage@v1
