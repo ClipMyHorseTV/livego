@@ -34,7 +34,7 @@ const (
 )
 
 var (
-	decDataNil        = fmt.Errorf("dec buf is nil")
+	decConfigTooShort = fmt.Errorf("avc decoder config record too short")
 	spsDataError      = fmt.Errorf("sps data error")
 	ppsHeaderError    = fmt.Errorf("pps header error")
 	ppsDataError      = fmt.Errorf("pps data error")
@@ -73,10 +73,10 @@ func NewParser() *Parser {
 	}
 }
 
-//return value 1:sps, value2 :pps
+// return value 1:sps, value2 :pps
 func (parser *Parser) parseSpecificInfo(src []byte) error {
 	if len(src) < 9 {
-		return decDataNil
+		return decConfigTooShort
 	}
 	sps := []byte{}
 	pps := []byte{}
