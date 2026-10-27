@@ -73,7 +73,7 @@ func NewParser() *Parser {
 	}
 }
 
-//return value 1:sps, value2 :pps
+// return value 1:sps, value2 :pps
 func (parser *Parser) parseSpecificInfo(src []byte) error {
 	if len(src) < 9 {
 		return decDataNil

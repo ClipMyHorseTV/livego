@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- livego is now a library only; the minimum supported Go version is 1.22.
+
+### Removed
+
+- the `livego` binary (`main.go`), Docker image, GoReleaser config and release workflow.
+
 ## [0.0.22]
 
 ### Fixed
