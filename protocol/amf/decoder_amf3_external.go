@@ -65,12 +65,10 @@ func (d *Decoder) decodeArrayCollection(r io.Reader) (any, error) {
 	return result, nil
 }
 
-func (d *Decoder) decodeExternal(r io.Reader, obj *Object, fieldSets ...[]string) (err error) {
-	var flagSet []uint8
-	var reservedPosition uint8
+func (d *Decoder) decodeExternal(r io.Reader, obj *Object, fieldSets ...[]string) error {
 	var fieldNames []string
 
-	flagSet, err = readFlags(r)
+	flagSet, err := readFlags(r)
 	if err != nil {
 		return fmt.Errorf("unable to read flags: %w", err)
 	}
@@ -82,7 +80,12 @@ func (d *Decoder) decodeExternal(r io.Reader, obj *Object, fieldSets ...[]string
 			fieldNames = []string{}
 		}
 
-		reservedPosition = uint8(len(fieldNames))
+		// each flag byte carries at most 7 field bits; the high bit signals another flag byte
+		n := len(fieldNames)
+		if n > 7 {
+			return fmt.Errorf("too many external fields in flag set %d: %d", i, n)
+		}
+		reservedPosition := uint8(n)
 
 		for p, field := range fieldNames {
 			flagBit := uint8(math.Exp2(float64(p)))
@@ -95,24 +98,36 @@ func (d *Decoder) decodeExternal(r io.Reader, obj *Object, fieldSets ...[]string
 			}
 		}
 
-		if (flags >> reservedPosition) != 0 {
-			for j := reservedPosition; j < 6; j++ {
-				if ((flags >> j) & 0x01) != 0 {
-					field := fmt.Sprintf("extra_%d_%d", i, j)
-					tmp, err := d.DecodeAmf3(r)
-					if err != nil {
-						return fmt.Errorf("unable to decode post-external field %d %d (%#v): %w", i, j, flagSet, err)
-					}
-					(*obj)[field] = tmp
-				}
-			}
+		if err := d.decodeReservedFields(r, obj, flagSet, i, reservedPosition); err != nil {
+			return err
 		}
 	}
 
-	return err
+	return nil
 }
 
-func readFlags(r io.Reader) (result []uint8, err error) {
+// decodeReservedFields decodes the fields flagged above reservedPosition in flag set i,
+// storing them as "extra_<set>_<bit>".
+func (d *Decoder) decodeReservedFields(r io.Reader, obj *Object, flagSet []uint8, i int, reservedPosition uint8) error {
+	flags := flagSet[i]
+	if (flags >> reservedPosition) == 0 {
+		return nil
+	}
+	for j := reservedPosition; j < 6; j++ {
+		if ((flags >> j) & 0x01) != 0 {
+			field := fmt.Sprintf("extra_%d_%d", i, j)
+			tmp, err := d.DecodeAmf3(r)
+			if err != nil {
+				return fmt.Errorf("unable to decode post-external field %d %d (%#v): %w", i, j, flagSet, err)
+			}
+			(*obj)[field] = tmp
+		}
+	}
+	return nil
+}
+
+func readFlags(r io.Reader) ([]uint8, error) {
+	var result []uint8
 	for {
 		flag, err := ReadByte(r)
 		if err != nil {
@@ -125,5 +140,5 @@ func readFlags(r io.Reader) (result []uint8, err error) {
 		}
 	}
 
-	return result, err
+	return result, nil
 }

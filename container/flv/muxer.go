@@ -45,11 +45,14 @@ func NewFlv(handler av.Handler, info av.Info) {
 
 const (
 	headerLen = 11
+	// maxTagDataLen is the largest payload an FLV tag can describe (24-bit DataSize field).
+	maxTagDataLen = 0xffffff
 )
 
 type FLVWriter struct {
-	Uid string
 	av.RWBaser
+
+	Uid             string
 	app, title, url string
 	buf             []byte
 	closed          chan struct{}
@@ -57,9 +60,9 @@ type FLVWriter struct {
 	closedWriter    bool
 }
 
-func NewFLVWriter(app, title, url string, ctx *os.File) *FLVWriter {
+func NewFLVWriter(app, title, url string, ctx *os.File) (*FLVWriter, error) {
 	ret := &FLVWriter{
-		Uid:     uid.NewId(),
+		Uid:     uid.NewID(),
 		app:     app,
 		title:   title,
 		url:     url,
@@ -69,30 +72,37 @@ func NewFLVWriter(app, title, url string, ctx *os.File) *FLVWriter {
 		buf:     make([]byte, headerLen),
 	}
 
-	ret.ctx.Write(flvHeader)
+	if _, err := ret.ctx.Write(flvHeader); err != nil {
+		return nil, err
+	}
 	pio.PutI32BE(ret.buf[:4], 0)
-	ret.ctx.Write(ret.buf[:4])
+	if _, err := ret.ctx.Write(ret.buf[:4]); err != nil {
+		return nil, err
+	}
 
-	return ret
+	return ret, nil
 }
 
 func (writer *FLVWriter) Write(p *av.Packet) error {
 	writer.RWBaser.SetPreTime()
 	h := writer.buf[:headerLen]
-	typeID := av.TAG_VIDEO
+	typeID := av.TagVideo
 	if !p.IsVideo {
 		if p.IsMetadata {
 			var err error
-			typeID = av.TAG_SCRIPTDATAAMF0
+			typeID = av.TagScriptDataAMF0
 			p.Data, err = amf.MetaDataReform(p.Data, amf.DEL)
 			if err != nil {
 				return err
 			}
 		} else {
-			typeID = av.TAG_AUDIO
+			typeID = av.TagAudio
 		}
 	}
 	dataLen := len(p.Data)
+	if dataLen > maxTagDataLen {
+		return fmt.Errorf("flv tag data too large: %d bytes", dataLen)
+	}
 	timestamp := p.TimeStamp
 	timestamp += writer.BaseTimeStamp()
 	writer.RWBaser.RecTimeStamp(timestamp, uint32(typeID))
@@ -123,10 +133,7 @@ func (writer *FLVWriter) Write(p *av.Packet) error {
 }
 
 func (writer *FLVWriter) Wait() {
-	select {
-	case <-writer.closed:
-		return
-	}
+	<-writer.closed
 }
 
 func (writer *FLVWriter) Close(error) {
@@ -134,7 +141,9 @@ func (writer *FLVWriter) Close(error) {
 		return
 	}
 	writer.closedWriter = true
-	writer.ctx.Close()
+	if err := writer.ctx.Close(); err != nil {
+		log.Warning("close flv file: ", err)
+	}
 	close(writer.closed)
 }
 
@@ -156,7 +165,7 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 
 	flvDir := configure.Config.GetString("flv_dir")
 
-	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0o755)
+	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0o750)
 	if err != nil {
 		log.Error("mkdir error: ", err)
 		return nil
@@ -164,13 +173,18 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 
 	fileName := fmt.Sprintf("%s_%d.%s", path.Join(flvDir, info.Key), time.Now().Unix(), "flv")
 	log.Debug("flv dvr save stream to: ", fileName)
-	w, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0o755)
+	w, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		log.Error("open file error: ", err)
 		return nil
 	}
 
-	writer := NewFLVWriter(paths[0], paths[1], info.URL, w)
+	writer, err := NewFLVWriter(paths[0], paths[1], info.URL, w)
+	if err != nil {
+		log.Error("write flv header: ", err)
+		_ = w.Close()
+		return nil
+	}
 	log.Debug("new flv dvr: ", writer.Info())
 	return writer
 }

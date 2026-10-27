@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp"
@@ -18,7 +20,7 @@ type Server struct {
 
 type stream struct {
 	Key string `json:"key"`
-	Id  string `json:"id"`
+	ID  string `json:"id"`
 }
 
 type streams struct {
@@ -40,39 +42,37 @@ func (server *Server) Serve(l net.Listener) error {
 	mux.HandleFunc("/streams", func(w http.ResponseWriter, r *http.Request) {
 		server.getStream(w, r)
 	})
-	if err := http.Serve(l, mux); err != nil {
-		return err
+	// no write timeout: FLV responses are long-lived streams
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
-	return nil
+	return srv.Serve(l)
 }
 
 // 获取发布和播放器的信息.
-func (server *Server) getStreams(w http.ResponseWriter, r *http.Request) *streams {
-	rtmpStream := server.handler.(*rtmp.RtmpStream)
-	if rtmpStream == nil {
+func (server *Server) getStreams() *streams {
+	rtmpStream, ok := server.handler.(*rtmp.RtmpStream)
+	if !ok || rtmpStream == nil {
 		return nil
 	}
 	msgs := new(streams)
 
 	rtmpStream.GetStreams().Range(func(key, val any) bool {
-		if s, ok := val.(*rtmp.Stream); ok {
-			if s.GetReader() != nil {
-				msg := stream{key.(string), s.GetReader().Info().UID}
-				msgs.Publishers = append(msgs.Publishers, msg)
-			}
+		k, ok := key.(string)
+		if !ok {
+			return true
 		}
-		return true
-	})
-
-	rtmpStream.GetStreams().Range(func(key, val any) bool {
-		ws := val.(*rtmp.Stream).GetWs()
-
-		ws.Range(func(k, v any) bool {
-			if pw, ok := v.(*rtmp.PackWriterCloser); ok {
-				if pw.GetWriter() != nil {
-					msg := stream{key.(string), pw.GetWriter().Info().UID}
-					msgs.Players = append(msgs.Players, msg)
-				}
+		s, ok := val.(*rtmp.Stream)
+		if !ok {
+			return true
+		}
+		if s.GetReader() != nil {
+			msgs.Publishers = append(msgs.Publishers, stream{k, s.GetReader().Info().UID})
+		}
+		s.GetWs().Range(func(_, v any) bool {
+			if pw, ok := v.(*rtmp.PackWriterCloser); ok && pw.GetWriter() != nil {
+				msgs.Players = append(msgs.Players, stream{k, pw.GetWriter().Info().UID})
 			}
 			return true
 		})
@@ -82,14 +82,20 @@ func (server *Server) getStreams(w http.ResponseWriter, r *http.Request) *stream
 	return msgs
 }
 
-func (server *Server) getStream(w http.ResponseWriter, r *http.Request) {
-	msgs := server.getStreams(w, r)
+func (server *Server) getStream(w http.ResponseWriter, _ *http.Request) {
+	msgs := server.getStreams()
 	if msgs == nil {
 		return
 	}
-	resp, _ := json.Marshal(msgs)
+	resp, err := json.Marshal(msgs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(resp)
+	if _, err := w.Write(resp); err != nil {
+		log.Debug("http flv: write streams response: ", err)
+	}
 }
 
 func (server *Server) handleConn(w http.ResponseWriter, r *http.Request) {
@@ -115,22 +121,10 @@ func (server *Server) handleConn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 判断视屏流是否发布,如果没有发布,直接返回404
-	msgs := server.getStreams(w, r)
-	if msgs == nil || len(msgs.Publishers) == 0 {
+	msgs := server.getStreams()
+	if msgs == nil || !slices.ContainsFunc(msgs.Publishers, func(item stream) bool { return item.Key == path }) {
 		http.Error(w, "invalid path", http.StatusNotFound)
 		return
-	} else {
-		include := false
-		for _, item := range msgs.Publishers {
-			if item.Key == path {
-				include = true
-				break
-			}
-		}
-		if !include {
-			http.Error(w, "invalid path", http.StatusNotFound)
-			return
-		}
 	}
 
 	w.Header().Set("Access-Control-Allow-Origin", "*")

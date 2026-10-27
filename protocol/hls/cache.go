@@ -12,7 +12,7 @@ const (
 	maxTSCacheNum = 3
 )
 
-var ErrNoKey = errors.New("No key for cache")
+var ErrNoKey = errors.New("no key for cache")
 
 type TSCacheItem struct {
 	id   string
@@ -35,6 +35,8 @@ func (tcCacheItem *TSCacheItem) ID() string {
 	return tcCacheItem.id
 }
 
+// GenM3U8PlayList renders the cached segments as an M3U8 playlist.
+//
 // TODO: found data race, fix it
 func (tcCacheItem *TSCacheItem) GenM3U8PlayList() ([]byte, error) {
 	var seq int
@@ -42,7 +44,10 @@ func (tcCacheItem *TSCacheItem) GenM3U8PlayList() ([]byte, error) {
 	var maxDuration int
 	m3u8body := bytes.NewBuffer(nil)
 	for e := tcCacheItem.ll.Front(); e != nil; e = e.Next() {
-		key := e.Value.(string)
+		key, ok := e.Value.(string)
+		if !ok {
+			continue
+		}
 		v, ok := tcCacheItem.lm[key]
 		if ok {
 			if v.Duration > maxDuration {
@@ -67,8 +72,9 @@ func (tcCacheItem *TSCacheItem) SetItem(key string, item TSItem) {
 	if tcCacheItem.ll.Len() == tcCacheItem.num {
 		e := tcCacheItem.ll.Front()
 		tcCacheItem.ll.Remove(e)
-		k := e.Value.(string)
-		delete(tcCacheItem.lm, k)
+		if k, ok := e.Value.(string); ok {
+			delete(tcCacheItem.lm, k)
+		}
 	}
 	tcCacheItem.lm[key] = item
 	tcCacheItem.ll.PushBack(key)

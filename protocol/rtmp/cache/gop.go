@@ -79,22 +79,21 @@ func (gopCache *GopCache) writeToArray(chunk *av.Packet, startNew bool) error {
 	} else {
 		ginc = gopCache.gops[(gopCache.nextindex+1)%gopCache.count]
 	}
-	ginc.write(chunk)
-
-	return nil
+	return ginc.write(chunk)
 }
 
 func (gopCache *GopCache) Write(p *av.Packet) {
 	var ok bool
 	if p.IsVideo {
-		vh := p.Header.(av.VideoPacketHeader)
-		if vh.IsKeyFrame() && !vh.IsSeq() {
+		vh, isVideoHeader := p.Header.(av.VideoPacketHeader)
+		if isVideoHeader && vh.IsKeyFrame() && !vh.IsSeq() {
 			ok = true
 		}
 	}
 	if ok || gopCache.start {
 		gopCache.start = true
-		gopCache.writeToArray(p, ok)
+		// a GOP longer than maxGOPCap is truncated; the next key frame starts a new one
+		_ = gopCache.writeToArray(p, ok)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestH264SeqDemux(t *testing.T) {
@@ -19,7 +20,7 @@ func TestH264SeqDemux(t *testing.T) {
 	d := NewParser()
 	w := bytes.NewBuffer(nil)
 	err := d.Parse(seq, true, w)
-	at.NoError(err)
+	require.NoError(t, err)
 	at.Equal([]byte{
 		0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00,
 		0x1e, 0xab, 0x40, 0x5a, 0x12, 0x6c, 0x09, 0x28, 0x28, 0x28, 0x2f,
@@ -37,7 +38,7 @@ func TestH264AnnexbDemux(t *testing.T) {
 	d := NewParser()
 	w := bytes.NewBuffer(nil)
 	err := d.Parse(nalu, false, w)
-	at.NoError(err)
+	require.NoError(t, err)
 	at.Equal(41, w.Len())
 }
 
@@ -62,7 +63,7 @@ func TestH264Mp4Demux(t *testing.T) {
 	d := NewParser()
 	w := bytes.NewBuffer(nil)
 	err := d.Parse(nalu, false, w)
-	at.NoError(err)
+	require.NoError(t, err)
 	at.Equal(47, w.Len())
 	at.Equal([]byte{
 		0x00, 0x00, 0x00, 0x01, 0x09, 0xf0, 0x00, 0x00, 0x00, 0x01, 0x67, 0x4d, 0x00, 0x1e, 0xab, 0x40, 0x5a, 0x12, 0x6c, 0x09, 0x28, 0x28,
@@ -80,7 +81,7 @@ func TestH264Mp4DemuxException1(t *testing.T) {
 	w := bytes.NewBuffer(nil)
 
 	err := d.Parse(nalu, false, w)
-	at.Equal(err, naluBodyLenError)
+	at.Equal(err, errNaluBodyLen)
 }
 
 func TestH264Mp4DemuxException2(t *testing.T) {
@@ -92,5 +93,5 @@ func TestH264Mp4DemuxException2(t *testing.T) {
 	d := NewParser()
 	w := bytes.NewBuffer(nil)
 	err := d.Parse(nalu, false, w)
-	at.Equal(err, naluBodyLenError)
+	at.Equal(err, errNaluBodyLen)
 }

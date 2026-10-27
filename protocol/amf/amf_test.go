@@ -34,10 +34,10 @@ func Compare(val any, ver Version, name string, t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(val, result) {
-		val_v := reflect.ValueOf(val)
-		result_v := reflect.ValueOf(result)
+		valV := reflect.ValueOf(val)
+		resultV := reflect.ValueOf(result)
 
-		t.Errorf("%s: comparison failed between %+v (%s) and %+v (%s)", name, val, val_v.Type(), result, result_v.Type())
+		t.Errorf("%s: comparison failed between %+v (%s) and %+v (%s)", name, val, valV.Type(), result, resultV.Type())
 
 		Dump("expected", val)
 		Dump("got", result)

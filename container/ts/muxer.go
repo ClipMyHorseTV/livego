@@ -1,6 +1,7 @@
 package ts
 
 import (
+	"encoding/binary"
 	"io"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -35,18 +36,17 @@ func (muxer *Muxer) Mux(p *av.Packet, w io.Writer) error {
 	first := true
 	wBytes := 0
 	pesIndex := 0
-	tmpLen := byte(0)
-	dataLen := byte(0)
 
 	var pes pesHeader
 	dts := int64(p.TimeStamp) * int64(h264DefaultHZ)
 	pts := dts
 	pid := audioPID
-	var videoH av.VideoPacketHeader
+	isKeyFrame := false
 	if p.IsVideo {
 		pid = videoPID
-		videoH, _ = p.Header.(av.VideoPacketHeader)
+		videoH, _ := p.Header.(av.VideoPacketHeader)
 		pts = dts + int64(videoH.CompositionTime())*int64(h264DefaultHZ)
+		isKeyFrame = videoH.IsKeyFrame()
 	}
 	err := pes.packet(p, pts, dts)
 	if err != nil {
@@ -56,72 +56,18 @@ func (muxer *Muxer) Mux(p *av.Packet, w io.Writer) error {
 	packetBytesLen := len(p.Data) + int(pesHeaderLen)
 
 	for packetBytesLen > 0 {
-		if p.IsVideo {
-			muxer.videoCc++
-			if muxer.videoCc > 0xf {
-				muxer.videoCc = 0
-			}
-		} else {
-			muxer.audioCc++
-			if muxer.audioCc > 0xf {
-				muxer.audioCc = 0
-			}
-		}
-
-		i := byte(0)
-
-		// sync byte
-		muxer.tsPacket[i] = 0x47
-		i++
-
-		// error indicator, unit start indicator,ts priority,pid
-		muxer.tsPacket[i] = byte(pid >> 8) // pid high 5 bits
-		if first {
-			muxer.tsPacket[i] = muxer.tsPacket[i] | 0x40 // unit start indicator
-		}
-		i++
-
-		// pid low 8 bits
-		muxer.tsPacket[i] = byte(pid)
-		i++
-
-		// scram control, adaptation control, counter
-		if p.IsVideo {
-			muxer.tsPacket[i] = 0x10 | byte(muxer.videoCc&0x0f)
-		} else {
-			muxer.tsPacket[i] = 0x10 | byte(muxer.audioCc&0x0f)
-		}
-		i++
+		i := muxer.writeTSHeader(pid, muxer.nextCC(p.IsVideo), first)
 
 		// 关键帧需要加pcr
-		if first && p.IsVideo && videoH.IsKeyFrame() {
-			muxer.tsPacket[3] |= 0x20
-			muxer.tsPacket[i] = 7
-			i++
-			muxer.tsPacket[i] = 0x50
-			i++
-			muxer.writePcr(muxer.tsPacket[0:], i, dts)
-			i += 6
+		if first && isKeyFrame {
+			i = muxer.writePCRField(i, dts)
 		}
 
 		// frame data
-		if packetBytesLen >= tsDefaultDataLen {
-			dataLen = tsDefaultDataLen
-			if first {
-				dataLen -= (i - 4)
-			}
-		} else {
-			muxer.tsPacket[3] |= 0x20 // have adaptation
-			remainBytes := byte(0)
-			dataLen = byte(packetBytesLen)
-			if first {
-				remainBytes = tsDefaultDataLen - dataLen - (i - 4)
-			} else {
-				remainBytes = tsDefaultDataLen - dataLen
-			}
-			muxer.adaptationBufInit(muxer.tsPacket[i:], byte(remainBytes))
-			i += remainBytes
-		}
+		var dataLen byte
+		dataLen, i = muxer.reservePayload(i, first, packetBytesLen)
+
+		var tmpLen byte
 		if first && i < tsPacketLen && pesHeaderLen > 0 {
 			tmpLen = min(pesHeaderLen, tsPacketLen-i)
 			copy(muxer.tsPacket[i:], pes.data[pesIndex:pesIndex+int(tmpLen)])
@@ -152,10 +98,72 @@ func (muxer *Muxer) Mux(p *av.Packet, w io.Writer) error {
 	return nil
 }
 
+// reservePayload determines the payload length of the current TS packet, whose header ends at i.
+// When the remaining data does not fill the packet, it pads the packet with an adaptation field.
+// It returns the payload length and the position where the payload starts.
+func (muxer *Muxer) reservePayload(i byte, first bool, packetBytesLen int) (dataLen, pos byte) {
+	if packetBytesLen <= 0 {
+		return 0, i
+	}
+	if packetBytesLen >= tsDefaultDataLen {
+		dataLen = tsDefaultDataLen
+		if first {
+			dataLen -= (i - 4)
+		}
+		return dataLen, i
+	}
+
+	muxer.tsPacket[3] |= 0x20 // have adaptation
+	dataLen = byte(packetBytesLen)
+	var remainBytes byte
+	if first {
+		remainBytes = tsDefaultDataLen - dataLen - (i - 4)
+	} else {
+		remainBytes = tsDefaultDataLen - dataLen
+	}
+	muxer.adaptationBufInit(muxer.tsPacket[i:], remainBytes)
+	return dataLen, i + remainBytes
+}
+
+// nextCC advances and returns the continuity counter of the audio or video stream.
+func (muxer *Muxer) nextCC(isVideo bool) byte {
+	if isVideo {
+		muxer.videoCc = (muxer.videoCc + 1) & 0x0f
+		return muxer.videoCc
+	}
+	muxer.audioCc = (muxer.audioCc + 1) & 0x0f
+	return muxer.audioCc
+}
+
+// writeTSHeader writes the 4-byte TS packet header and returns the write position after it.
+func (muxer *Muxer) writeTSHeader(pid int, cc byte, first bool) byte {
+	i := byte(0)
+
+	// sync byte
+	muxer.tsPacket[i] = 0x47
+	i++
+
+	// error indicator, unit start indicator,ts priority,pid
+	muxer.tsPacket[i] = byte((pid >> 8) & 0xff) // pid high 5 bits
+	if first {
+		muxer.tsPacket[i] |= 0x40 // unit start indicator
+	}
+	i++
+
+	// pid low 8 bits
+	muxer.tsPacket[i] = byte(pid & 0xff)
+	i++
+
+	// scram control, adaptation control, counter
+	muxer.tsPacket[i] = 0x10 | cc&0x0f
+	i++
+
+	return i
+}
+
 // PAT return pat data.
 func (muxer *Muxer) PAT() []byte {
 	i := 0
-	remainByte := 0
 	tsHeader := []byte{0x47, 0x40, 0x00, 0x10, 0x00}
 	patHeader := []byte{0x00, 0xb0, 0x0d, 0x00, 0x01, 0xc1, 0x00, 0x00, 0x00, 0x01, 0xf0, 0x01}
 
@@ -171,17 +179,10 @@ func (muxer *Muxer) PAT() []byte {
 	copy(muxer.pat[i:], patHeader)
 	i += len(patHeader)
 
-	crc32Value := GenCrc32(patHeader)
-	muxer.pat[i] = byte(crc32Value >> 24)
-	i++
-	muxer.pat[i] = byte(crc32Value >> 16)
-	i++
-	muxer.pat[i] = byte(crc32Value >> 8)
-	i++
-	muxer.pat[i] = byte(crc32Value)
-	i++
+	binary.BigEndian.PutUint32(muxer.pat[i:], GenCrc32(patHeader))
+	i += 4
 
-	remainByte = int(tsPacketLen - i)
+	remainByte := tsPacketLen - i
 	for j := range remainByte {
 		muxer.pat[i+j] = 0xff
 	}
@@ -191,10 +192,7 @@ func (muxer *Muxer) PAT() []byte {
 
 // PMT return pmt data.
 func (muxer *Muxer) PMT(soundFormat byte, hasVideo bool) []byte {
-	i := int(0)
-	j := int(0)
 	var progInfo []byte
-	remainBytes := int(0)
 	tsHeader := []byte{0x47, 0x50, 0x01, 0x10, 0x00}
 	pmtHeader := []byte{0x02, 0xb0, 0xff, 0x00, 0x01, 0xc1, 0x00, 0x00, 0xe1, 0x00, 0xf0, 0x00}
 	if !hasVideo {
@@ -206,7 +204,7 @@ func (muxer *Muxer) PMT(soundFormat byte, hasVideo bool) []byte {
 			0x0f, 0xe1, 0x01, 0xf0, 0x00, // mp3 or aac
 		}
 	}
-	pmtHeader[2] = byte(len(progInfo) + 9 + 4)
+	pmtHeader[2] = byte((len(progInfo) + 9 + 4) & 0xff) // section length, low 8 bits
 
 	if muxer.pmtCc > 0xf {
 		muxer.pmtCc = 0
@@ -223,6 +221,7 @@ func (muxer *Muxer) PMT(soundFormat byte, hasVideo bool) []byte {
 		}
 	}
 
+	i := 0
 	copy(muxer.pmt[i:], tsHeader)
 	i += len(tsHeader)
 
@@ -232,18 +231,11 @@ func (muxer *Muxer) PMT(soundFormat byte, hasVideo bool) []byte {
 	copy(muxer.pmt[i:], progInfo[0:])
 	i += len(progInfo)
 
-	crc32Value := GenCrc32(muxer.pmt[5 : 5+len(pmtHeader)+len(progInfo)])
-	muxer.pmt[i] = byte(crc32Value >> 24)
-	i++
-	muxer.pmt[i] = byte(crc32Value >> 16)
-	i++
-	muxer.pmt[i] = byte(crc32Value >> 8)
-	i++
-	muxer.pmt[i] = byte(crc32Value)
-	i++
+	binary.BigEndian.PutUint32(muxer.pmt[i:], GenCrc32(muxer.pmt[5:5+len(pmtHeader)+len(progInfo)]))
+	i += 4
 
-	remainBytes = int(tsPacketLen - i)
-	for j = 0; j < remainBytes; j++ {
+	remainBytes := tsPacketLen - i
+	for j := range remainBytes {
 		muxer.pmt[i+j] = 0xff
 	}
 
@@ -251,19 +243,30 @@ func (muxer *Muxer) PMT(soundFormat byte, hasVideo bool) []byte {
 }
 
 func (muxer *Muxer) adaptationBufInit(src []byte, remainBytes byte) {
-	src[0] = byte(remainBytes - 1)
+	src[0] = remainBytes - 1
 	if remainBytes == 1 {
-	} else {
-		src[1] = 0x00
-		for i := 2; i < len(src); i++ {
-			src[i] = 0xff
-		}
+		return
 	}
-	return
+	src[1] = 0x00
+	for i := 2; i < len(src); i++ {
+		src[i] = 0xff
+	}
 }
 
-func (muxer *Muxer) writePcr(b []byte, i byte, pcr int64) error {
-	b[i] = byte(pcr >> 25)
+// writePCRField writes an adaptation field carrying the PCR at position i and returns the
+// write position after it.
+func (muxer *Muxer) writePCRField(i byte, dts int64) byte {
+	muxer.tsPacket[3] |= 0x20
+	muxer.tsPacket[i] = 7
+	i++
+	muxer.tsPacket[i] = 0x50
+	i++
+	muxer.writePcr(muxer.tsPacket[0:], i, dts)
+	return i + 6
+}
+
+func (muxer *Muxer) writePcr(b []byte, i byte, pcr int64) {
+	b[i] = byte((pcr >> 25) & 0xff)
 	i++
 	b[i] = byte((pcr >> 17) & 0xff)
 	i++
@@ -271,11 +274,9 @@ func (muxer *Muxer) writePcr(b []byte, i byte, pcr int64) error {
 	i++
 	b[i] = byte((pcr >> 1) & 0xff)
 	i++
-	b[i] = byte(((pcr & 0x1) << 7) | 0x7e)
+	b[i] = byte(pcr&0x1)<<7 | 0x7e
 	i++
 	b[i] = 0x00
-
-	return nil
 }
 
 type pesHeader struct {
@@ -338,22 +339,21 @@ func (header *pesHeader) packet(p *av.Packet, pts, dts int64) error {
 }
 
 func (header *pesHeader) writeTs(src []byte, i int, fb int, ts int64) {
-	val := uint32(0)
 	if ts > 0x1ffffffff {
 		ts -= 0x1ffffffff
 	}
-	val = uint32(fb<<4) | ((uint32(ts>>30) & 0x07) << 1) | 1
-	src[i] = byte(val)
+	val := int64(fb<<4) | ((ts>>30)&0x07)<<1 | 1
+	src[i] = byte(val & 0xff)
 	i++
 
-	val = ((uint32(ts>>15) & 0x7fff) << 1) | 1
-	src[i] = byte(val >> 8)
+	val = ((ts>>15)&0x7fff)<<1 | 1
+	src[i] = byte((val >> 8) & 0xff)
 	i++
-	src[i] = byte(val)
+	src[i] = byte(val & 0xff)
 	i++
 
-	val = (uint32(ts&0x7fff) << 1) | 1
-	src[i] = byte(val >> 8)
+	val = (ts&0x7fff)<<1 | 1
+	src[i] = byte((val >> 8) & 0xff)
 	i++
-	src[i] = byte(val)
+	src[i] = byte(val & 0xff)
 }

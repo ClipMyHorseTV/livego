@@ -6,6 +6,7 @@ import (
 	"github.com/ClipMyHorseTV/livego/av"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type TestWriter struct {
@@ -35,7 +36,7 @@ func TestTSEncoder(t *testing.T) {
 		Data:    data,
 	}
 	err := m.Mux(&p, w)
-	at.NoError(err)
+	require.NoError(t, err)
 	at.Equal(1, w.count)
 	at.Equal([]byte{
 		0x47, 0x41, 0x01, 0x31, 0x81, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,

@@ -19,7 +19,7 @@ func I16BE(b []byte) (i int16) {
 }
 
 func I24BE(b []byte) (i int32) {
-	i = int32(int8(b[0]))
+	i = int32(b[0]) << 24 >> 24 // sign-extend the most significant byte
 	i <<= 8
 	i |= int32(b[1])
 	i <<= 8
@@ -37,7 +37,7 @@ func U24BE(b []byte) (i uint32) {
 }
 
 func I32BE(b []byte) (i int32) {
-	i = int32(int8(b[0]))
+	i = int32(b[0]) << 24 >> 24 // sign-extend the most significant byte
 	i <<= 8
 	i |= int32(b[1])
 	i <<= 8
@@ -102,7 +102,7 @@ func U64BE(b []byte) (i uint64) {
 }
 
 func I64BE(b []byte) (i int64) {
-	i = int64(int8(b[0]))
+	i = int64(b[0]) << 56 >> 56 // sign-extend the most significant byte
 	i <<= 8
 	i |= int64(b[1])
 	i <<= 8

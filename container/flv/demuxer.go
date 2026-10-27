@@ -31,7 +31,7 @@ func (d *Demuxer) Demux(p *av.Packet) error {
 	if err != nil {
 		return err
 	}
-	if tag.CodecID() == av.VIDEO_H264 &&
+	if tag.CodecID() == av.VideoH264 &&
 		p.Data[0] == 0x17 && p.Data[1] == 0x02 {
 		return ErrAvcEndSEQ
 	}

@@ -2,12 +2,14 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math"
+	"math/rand/v2"
 	"net"
 	neturl "net/url"
 	"strings"
@@ -62,73 +64,96 @@ func (connClient *ConnClient) DecodeBatch(r io.Reader, ver amf.Version) (ret []a
 }
 
 func (connClient *ConnClient) readRespMsg() error {
-	var err error
 	var rc ChunkStream
 	for {
-		if err = connClient.conn.Read(&rc); err != nil {
+		if err := connClient.conn.Read(&rc); err != nil {
 			return err
 		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			return err
+		if rc.TypeID != 20 && rc.TypeID != 17 {
+			continue
 		}
-		switch rc.TypeID {
-		case 20, 17:
-			r := bytes.NewReader(rc.Data)
-			vs, _ := connClient.decoder.DecodeBatch(r, amf.AMF0)
 
-			log.Debugf("readRespMsg: vs=%v", vs)
-			for k, v := range vs {
-				switch v.(type) {
-				case string:
-					switch connClient.curcmdName {
-					case cmdConnect, cmdCreateStream:
-						if v.(string) != respResult {
-							return errors.New(v.(string))
-						}
+		r := bytes.NewReader(rc.Data)
+		vs, _ := connClient.decoder.DecodeBatch(r, amf.AMF0)
 
-					case cmdPublish:
-						if v.(string) != onStatus {
-							return ErrFail
-						}
-					}
-				case float64:
-					switch connClient.curcmdName {
-					case cmdConnect, cmdCreateStream:
-						id := int(v.(float64))
-
-						switch k {
-						case 1:
-							if id != connClient.transID {
-								return ErrFail
-							}
-						case 3:
-							connClient.streamid = uint32(id)
-						}
-					case cmdPublish:
-						if int(v.(float64)) != 0 {
-							return ErrFail
-						}
-					}
-				case amf.Object:
-					objmap := v.(amf.Object)
-					switch connClient.curcmdName {
-					case cmdConnect:
-						code, ok := objmap["code"]
-						if ok && code.(string) != connectSuccess {
-							return ErrFail
-						}
-					case cmdPublish:
-						code, ok := objmap["code"]
-						if ok && code.(string) != publishStart {
-							return ErrFail
-						}
-					}
-				}
+		log.Debugf("readRespMsg: vs=%v", vs)
+		for k, v := range vs {
+			if err := connClient.checkRespValue(k, v); err != nil {
+				return err
 			}
+		}
 
-			return nil
+		return nil
+	}
+}
+
+// checkRespValue validates the k-th value of a command response against the command that was sent.
+func (connClient *ConnClient) checkRespValue(k int, v any) error {
+	switch v := v.(type) {
+	case string:
+		return connClient.checkRespString(v)
+	case float64:
+		return connClient.checkRespNumber(k, v)
+	case amf.Object:
+		return connClient.checkRespObject(v)
+	}
+	return nil
+}
+
+func (connClient *ConnClient) checkRespString(v string) error {
+	switch connClient.curcmdName {
+	case cmdConnect, cmdCreateStream:
+		if v != respResult {
+			return errors.New(v)
+		}
+	case cmdPublish:
+		if v != onStatus {
+			return ErrFail
 		}
 	}
+	return nil
+}
+
+func (connClient *ConnClient) checkRespNumber(k int, v float64) error {
+	switch connClient.curcmdName {
+	case cmdConnect, cmdCreateStream:
+		switch k {
+		case 1:
+			if int(v) != connClient.transID {
+				return ErrFail
+			}
+		case 3:
+			if v < 0 || v > math.MaxUint32 {
+				return fmt.Errorf("invalid stream id %v", v)
+			}
+			connClient.streamid = uint32(v)
+		}
+	case cmdPublish:
+		if int(v) != 0 {
+			return ErrFail
+		}
+	}
+	return nil
+}
+
+func (connClient *ConnClient) checkRespObject(obj amf.Object) error {
+	var want string
+	switch connClient.curcmdName {
+	case cmdConnect:
+		want = connectSuccess
+	case cmdPublish:
+		want = publishStart
+	default:
+		return nil
+	}
+	code, ok := obj["code"]
+	if !ok {
+		return nil
+	}
+	if s, isString := code.(string); !isString || s != want {
+		return ErrFail
+	}
+	return nil
 }
 
 func (connClient *ConnClient) writeMsg(args ...any) error {
@@ -139,16 +164,22 @@ func (connClient *ConnClient) writeMsg(args ...any) error {
 		}
 	}
 	msg := connClient.bytesw.Bytes()
+	length, err := MessageLength(len(msg))
+	if err != nil {
+		return err
+	}
 	c := ChunkStream{
 		Format:    0,
 		CSID:      3,
 		Timestamp: 0,
 		TypeID:    20,
 		StreamID:  connClient.streamid,
-		Length:    uint32(len(msg)),
+		Length:    length,
 		Data:      msg,
 	}
-	connClient.conn.Write(&c)
+	if err := connClient.conn.Write(&c); err != nil {
+		return err
+	}
 	return connClient.conn.Flush()
 }
 
@@ -179,7 +210,7 @@ func (connClient *ConnClient) writeCreateStreamMsg() error {
 	for {
 		err := connClient.readRespMsg()
 		if err == nil {
-			return err
+			return nil
 		}
 
 		if errors.Is(err, ErrFail) {
@@ -210,16 +241,18 @@ func (connClient *ConnClient) writePlayMsg() error {
 	return connClient.readRespMsg()
 }
 
-func (connClient *ConnClient) Start(url string, method string) error {
+// parseURL takes app, stream name and tcUrl from the RTMP(S) URL and returns the host and
+// the port (with leading colon) to connect to.
+func (connClient *ConnClient) parseURL(url string) (host, port string, err error) {
 	u, err := neturl.Parse(url)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	connClient.url = url
 	path := strings.TrimLeft(u.Path, "/")
 	ps := strings.SplitN(path, "/", 2)
 	if len(ps) != 2 {
-		return fmt.Errorf("u path err: %s", path)
+		return "", "", fmt.Errorf("u path err: %s", path)
 	}
 	connClient.app = ps[0]
 	connClient.title = ps[1]
@@ -228,7 +261,6 @@ func (connClient *ConnClient) Start(url string, method string) error {
 	}
 	connClient.isRTMPS = strings.HasPrefix(url, "rtmps://")
 
-	var port string
 	if connClient.isRTMPS {
 		connClient.tcurl = "rtmps://" + u.Host + "/" + connClient.app
 		port = ":443"
@@ -237,25 +269,47 @@ func (connClient *ConnClient) Start(url string, method string) error {
 		port = ":1935"
 	}
 
-	host := u.Host
-	localIP := ":0"
-	var remoteIP string
+	host = u.Host
 	if strings.Contains(host, ":") {
 		host, port, err = net.SplitHostPort(host)
 		if err != nil {
-			return err
+			return "", "", err
 		}
 		port = ":" + port
 	}
-	ips, err := net.LookupIP(host)
+	return host, port, nil
+}
+
+// resolveRemote resolves host and returns one of its addresses, with port appended for IPv4.
+func resolveRemote(ctx context.Context, host, port string) (string, error) {
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	log.Debugf("ips: %v, host: %v", ips, host)
+	if err != nil {
+		return "", err
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no addresses found for host %s", host)
+	}
+	//nolint:gosec // G404: only spreads connections across the resolved addresses, not security relevant.
+	remoteIP := ips[rand.IntN(len(ips))].IP.String()
+	if !strings.Contains(remoteIP, ":") {
+		remoteIP += port
+	}
+	return remoteIP, nil
+}
+
+func (connClient *ConnClient) Start(url string, method string) error {
+	host, port, err := connClient.parseURL(url)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	localIP := ":0"
+	remoteIP, err := resolveRemote(ctx, host, port)
 	if err != nil {
 		log.Warning(err)
 		return err
-	}
-	remoteIP = ips[rand.Intn(len(ips))].String()
-	if !strings.Contains(remoteIP, ":") {
-		remoteIP += port
 	}
 
 	local, err := net.ResolveTCPAddr("tcp", localIP)
@@ -270,31 +324,10 @@ func (connClient *ConnClient) Start(url string, method string) error {
 		return err
 	}
 
-	var conn net.Conn
-	if connClient.isRTMPS {
-		var config tls.Config
-		if configure.Config.GetBool("enable_tls_verify") {
-			roots, err := x509.SystemCertPool()
-			if err != nil {
-				log.Warning(err)
-				return err
-			}
-			config.RootCAs = roots
-		} else {
-			config.InsecureSkipVerify = true
-		}
-
-		conn, err = tls.Dial("tcp", remoteIP, &config)
-		if err != nil {
-			log.Warning(err)
-			return err
-		}
-	} else {
-		conn, err = net.DialTCP("tcp", local, remote)
-		if err != nil {
-			log.Warning(err)
-			return err
-		}
+	conn, err := connClient.dial(ctx, local, remote)
+	if err != nil {
+		log.Warning(err)
+		return err
 	}
 
 	log.Debug("connection:", "local:", conn.LocalAddr(), "remote:", conn.RemoteAddr())
@@ -331,14 +364,44 @@ func (connClient *ConnClient) Start(url string, method string) error {
 	return nil
 }
 
+// dial opens the TCP or, for rtmps URLs, TLS connection to remote.
+func (connClient *ConnClient) dial(ctx context.Context, local, remote *net.TCPAddr) (net.Conn, error) {
+	if !connClient.isRTMPS {
+		return net.DialTCP("tcp", local, remote)
+	}
+
+	config, err := tlsConfig()
+	if err != nil {
+		return nil, err
+	}
+	dialer := &tls.Dialer{Config: config}
+	return dialer.DialContext(ctx, "tcp", remote.String())
+}
+
+// tlsConfig returns the client TLS configuration, verifying against the system roots unless
+// enable_tls_verify is turned off.
+func tlsConfig() (*tls.Config, error) {
+	if !configure.Config.GetBool("enable_tls_verify") {
+		//nolint:gosec // G402: verification is disabled explicitly via the enable_tls_verify option.
+		return &tls.Config{InsecureSkipVerify: true}, nil
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, err
+	}
+	return &tls.Config{RootCAs: roots}, nil
+}
+
 func (connClient *ConnClient) Write(c ChunkStream) error {
-	if c.TypeID == av.TAG_SCRIPTDATAAMF0 ||
-		c.TypeID == av.TAG_SCRIPTDATAAMF3 {
+	if c.TypeID == av.TagScriptDataAMF0 ||
+		c.TypeID == av.TagScriptDataAMF3 {
 		var err error
 		if c.Data, err = amf.MetaDataReform(c.Data, amf.ADD); err != nil {
 			return err
 		}
-		c.Length = uint32(len(c.Data))
+		if c.Length, err = MessageLength(len(c.Data)); err != nil {
+			return err
+		}
 	}
 	return connClient.conn.Write(&c)
 }
@@ -358,10 +421,12 @@ func (connClient *ConnClient) GetInfo() (app string, name string, url string) {
 	return app, name, url
 }
 
-func (connClient *ConnClient) GetStreamId() uint32 {
+func (connClient *ConnClient) GetStreamID() uint32 {
 	return connClient.streamid
 }
 
-func (connClient *ConnClient) Close(err error) {
-	connClient.conn.Close()
+func (connClient *ConnClient) Close(error) {
+	if err := connClient.conn.Close(); err != nil {
+		log.Debug("rtmp client close: ", err)
+	}
 }

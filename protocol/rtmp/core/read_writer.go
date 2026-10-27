@@ -90,7 +90,7 @@ func (rw *ReadWriter) WriteUintBE(v uint32, n int) error {
 		return rw.writeError
 	}
 	for i := range n {
-		b := byte(v>>uint32((n-i-1)<<3)) & 0xff
+		b := byte((v >> ((n - i - 1) << 3)) & 0xff)
 		if err := rw.WriteByte(b); err != nil {
 			rw.writeError = err
 			return err
@@ -109,7 +109,7 @@ func (rw *ReadWriter) WriteUintLE(v uint32, n int) error {
 			rw.writeError = err
 			return err
 		}
-		v = v >> 8
+		v >>= 8
 	}
 	return nil
 }

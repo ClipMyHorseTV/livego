@@ -68,11 +68,11 @@ func GenCrc32(src []byte) uint32 {
 		0xbcb4666d, 0xb8757bda, 0xb5365d03, 0xb1f740b4,
 	}
 
-	j := byte(0)
+	var j byte
 	crc32 := uint32(0xFFFFFFFF)
 	for i := range src {
 		j = (byte(crc32>>24) ^ src[i]) & 0xff
-		crc32 = uint32(uint32(crc32<<8) ^ uint32(crcTable[j]))
+		crc32 = (crc32 << 8) ^ crcTable[j]
 	}
 
 	return crc32

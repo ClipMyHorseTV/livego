@@ -18,15 +18,16 @@ const (
 	OnMetaData   string = "onMetaData"
 )
 
-var setFrameFrame []byte
+// setFrameFrame is SetDataFrame encoded as an AMF0 string.
+var setFrameFrame = encodeSetDataFrame()
 
-func init() {
+func encodeSetDataFrame() []byte {
 	b := bytes.NewBuffer(nil)
 	encoder := &Encoder{}
 	if _, err := encoder.Encode(b, SetDataFrame, AMF0); err != nil {
 		log.Fatal(err)
 	}
-	setFrameFrame = b.Bytes()
+	return b.Bytes()
 }
 
 func MetaDataReform(p []byte, flag uint8) ([]byte, error) {

@@ -27,7 +27,7 @@ func (parser *Parser) Parse(src []byte) error {
 		return errMp3DataInvalid
 	}
 	index := (src[2] >> 2) & 0x3
-	if index <= byte(len(mp3Rates)-1) {
+	if int(index) < len(mp3Rates) {
 		parser.samplingFrequency = mp3Rates[index]
 		return nil
 	}

@@ -162,6 +162,11 @@ linters:
     #- wsl # [too strict and mostly code is not more readable] whitespace linter forces you to use empty lines
     #- wsl_v5 # [too strict and mostly code is not more readable] add or remove empty lines
 
+  # Linters in the "standard" default set (errcheck, govet, ineffassign, staticcheck, unused)
+  # stay enabled unless they are explicitly disabled here.
+  disable:
+    - unused # checks for unused constants, variables, functions and types
+
   # All settings can be found here https://github.com/golangci/golangci-lint/blob/HEAD/.golangci.reference.yml
   settings:
     cyclop:

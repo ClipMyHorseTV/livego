@@ -7,13 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- golangci-lint config (`.golangci.yaml`).
+- `make lint`, `make fmt` and `make install-dev` targets.
+- `core.MessageLength` to validate RTMP message lengths.
+
 ### Changed
 
-- livego is now a library only; the minimum supported Go version is 1.22.
+- livego is now a library only.
+- Minimum supported Go version is 1.22.
+- **Breaking:** exported names use Go naming (e.g. `TAG_AUDIO` → `TagAudio`).
+- **Breaking:** `Url`/`Id` names are now `URL`/`ID` (e.g. `StreamID`, `NewID`).
+- **Breaking:** `flv.NewFLVWriter` now returns an error.
+- **Breaking:** `Conn.SetBegin` and `Conn.SetRecorded` now return an error.
+- **Breaking:** API and HLS `Serve` now return the server error.
+- Replaced `satori/go.uuid` with `google/uuid`.
+- Stream keys are generated with `crypto/rand`.
+- HTTP servers set a 10s `ReadHeaderTimeout`.
+- FLV recordings are created with `0600`, folders with `0750`.
+- A failed flush now closes the RTMP writer.
+- Ignored errors are now handled or logged.
+
+### Fixed
+
+- Default config was stored under the wrong keys.
+- HLS crashed when the audio sample rate was unknown.
+- Negative composition times broke HLS PTS.
+- Oversized FLV tags, ADTS frames and AMF strings no longer get truncated lengths.
+- Oversized RTMP messages now return an error.
+- Panics on unexpected types in AMF, RTMP and cache code.
+- AMF3 dynamic objects wrote the end marker after every member.
+- AMF0 ECMA array length errors were ignored.
+- Chunk size 0 caused a division by zero.
 
 ### Removed
 
-- the `livego` binary (`main.go`), Docker image, GoReleaser config and release workflow.
+- The `livego` binary (`main.go`).
+- Docker image, GoReleaser config and release workflow.
 
 ## [0.0.22]
 

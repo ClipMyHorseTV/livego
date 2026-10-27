@@ -31,9 +31,8 @@ func (rs *RtmpStream) HandleReader(r av.ReadCloser) {
 	info := r.Info()
 	log.Debugf("HandleReader: info[%v]", info)
 
-	var stream *Stream
-	i, ok := rs.streams.Load(info.Key)
-	if stream, ok = i.(*Stream); ok {
+	i, _ := rs.streams.Load(info.Key)
+	if stream, ok := i.(*Stream); ok {
 		stream.TransStop()
 		id := stream.ID()
 		if id != EmptyID && id != info.UID {
@@ -42,12 +41,13 @@ func (rs *RtmpStream) HandleReader(r av.ReadCloser) {
 			stream = ns
 			rs.streams.Store(info.Key, ns)
 		}
-	} else {
-		stream = NewStream()
-		rs.streams.Store(info.Key, stream)
-		stream.info = info
+		stream.AddReader(r)
+		return
 	}
 
+	stream := NewStream()
+	rs.streams.Store(info.Key, stream)
+	stream.info = info
 	stream.AddReader(r)
 }
 
@@ -55,17 +55,16 @@ func (rs *RtmpStream) HandleWriter(w av.WriteCloser) {
 	info := w.Info()
 	log.Debugf("HandleWriter: info[%v]", info)
 
-	var s *Stream
-	item, ok := rs.streams.Load(info.Key)
-	if !ok {
-		log.Debugf("HandleWriter: not found create new info[%v]", info)
-		s = NewStream()
-		rs.streams.Store(info.Key, s)
-		s.info = info
-	} else {
-		s = item.(*Stream)
+	item, _ := rs.streams.Load(info.Key)
+	if s, ok := item.(*Stream); ok {
 		s.AddWriter(w)
+		return
 	}
+
+	log.Debugf("HandleWriter: not found create new info[%v]", info)
+	s := NewStream()
+	rs.streams.Store(info.Key, s)
+	s.info = info
 }
 
 func (rs *RtmpStream) GetStreams() *sync.Map {
@@ -76,8 +75,8 @@ func (rs *RtmpStream) CheckAlive() {
 	for {
 		<-time.After(5 * time.Second)
 		rs.streams.Range(func(key, val any) bool {
-			v := val.(*Stream)
-			if v.CheckAlive() == 0 {
+			v, ok := val.(*Stream)
+			if !ok || v.CheckAlive() == 0 {
 				rs.streams.Delete(key)
 			}
 			return true
@@ -127,8 +126,11 @@ func (s *Stream) GetWs() *sync.Map {
 func (s *Stream) Copy(dst *Stream) {
 	dst.info = s.info
 	s.ws.Range(func(key, val any) bool {
-		v := val.(*PackWriterCloser)
 		s.ws.Delete(key)
+		v, ok := val.(*PackWriterCloser)
+		if !ok {
+			return true
+		}
 		v.w.CalcBaseTimestamp()
 		dst.AddWriter(v.w)
 		return true
@@ -146,10 +148,8 @@ func (s *Stream) AddWriter(w av.WriteCloser) {
 	s.ws.Store(info.UID, pw)
 }
 
-/*
-检测本application下是否配置static_push,
-如果配置, 启动push远端的连接.
-*/
+// StartStaticPush checks whether static_push is configured for this
+// application and, if so, starts the push connections to the remote hosts.
 func (s *Stream) StartStaticPush() {
 	key := s.info.Key
 
@@ -173,8 +173,8 @@ func (s *Stream) StartStaticPush() {
 		return
 	}
 
-	for _, pushurl := range pushurllist {
-		pushurl := pushurl + "/" + streamname
+	for _, baseURL := range pushurllist {
+		pushurl := baseURL + "/" + streamname
 		log.Debugf("StartStaticPush: static pushurl=%s", pushurl)
 
 		staticpushObj := rtmprelay.GetAndCreateStaticPushObject(pushurl)
@@ -214,8 +214,8 @@ func (s *Stream) StopStaticPush() {
 		return
 	}
 
-	for _, pushurl := range pushurllist {
-		pushurl := pushurl + "/" + streamname
+	for _, baseURL := range pushurllist {
+		pushurl := baseURL + "/" + streamname
 		log.Debugf("StopStaticPush: static pushurl=%s", pushurl)
 
 		staticpushObj, err := rtmprelay.GetStaticPushObject(pushurl)
@@ -253,8 +253,8 @@ func (s *Stream) IsSendStaticPush() bool {
 
 	streamname := after
 
-	for _, pushurl := range pushurllist {
-		pushurl := pushurl + "/" + streamname
+	for _, baseURL := range pushurllist {
+		pushurl := baseURL + "/" + streamname
 		// log.Debugf("SendStaticPush: static pushurl=%s", pushurl)
 
 		staticpushObj, err := rtmprelay.GetStaticPushObject(pushurl)
@@ -292,8 +292,8 @@ func (s *Stream) SendStaticPush(packet av.Packet) {
 		return
 	}
 
-	for _, pushurl := range pushurllist {
-		pushurl := pushurl + "/" + streamname
+	for _, baseURL := range pushurllist {
+		pushurl := baseURL + "/" + streamname
 		// log.Debugf("SendStaticPush: static pushurl=%s", pushurl)
 
 		staticpushObj, err := rtmprelay.GetStaticPushObject(pushurl)
@@ -333,7 +333,10 @@ func (s *Stream) TransStart() {
 		s.cache.Write(p)
 
 		s.ws.Range(func(key, val any) bool {
-			v := val.(*PackWriterCloser)
+			v, ok := val.(*PackWriterCloser)
+			if !ok {
+				return true
+			}
 			if !v.init {
 				// log.Debugf("cache.send: %v", v.w.Info())
 				if err = s.cache.Send(v.w); err != nil {
@@ -376,8 +379,8 @@ func (s *Stream) CheckAlive() (n int) {
 	}
 
 	s.ws.Range(func(key, val any) bool {
-		v := val.(*PackWriterCloser)
-		if v.w != nil {
+		v, ok := val.(*PackWriterCloser)
+		if ok && v.w != nil {
 			// Alive from RWBaser, check last frame now - timestamp, if > timeout then Remove it
 			if !v.w.Alive() {
 				log.Infof("write timeout remove")
@@ -400,8 +403,8 @@ func (s *Stream) closeInter() {
 	}
 
 	s.ws.Range(func(key, val any) bool {
-		v := val.(*PackWriterCloser)
-		if v.w != nil {
+		v, ok := val.(*PackWriterCloser)
+		if ok && v.w != nil {
 			v.w.Close(errors.New("closed"))
 			if v.w.Info().IsInterval() {
 				s.ws.Delete(key)

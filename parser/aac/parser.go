@@ -26,12 +26,14 @@ type mpegCfgInfo struct {
 var aacRates = []int{96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350}
 
 var (
-	specificBufInvalid = errors.New("audio mpegspecific error")
-	audioBufInvalid    = errors.New("audiodata  invalid")
+	errSpecificBufInvalid = errors.New("audio mpegspecific error")
+	errAudioBufInvalid    = errors.New("audiodata  invalid")
+	errAudioBufTooLarge   = errors.New("audiodata too large for an ADTS frame")
 )
 
 const (
-	adtsHeaderLen = 7
+	adtsHeaderLen   = 7
+	maxADTSFrameLen = 0x1fff
 )
 
 type Parser struct {
@@ -50,7 +52,7 @@ func NewParser() *Parser {
 
 func (parser *Parser) specificInfo(src []byte) error {
 	if len(src) < 2 {
-		return specificBufInvalid
+		return errSpecificBufInvalid
 	}
 	parser.gettedSpecific = true
 	parser.cfgInfo.objectType = (src[0] >> 3) & 0xff
@@ -60,30 +62,35 @@ func (parser *Parser) specificInfo(src []byte) error {
 }
 
 func (parser *Parser) adts(src []byte, w io.Writer) error {
-	if len(src) <= 0 || !parser.gettedSpecific {
-		return audioBufInvalid
+	if len(src) == 0 || !parser.gettedSpecific {
+		return errAudioBufInvalid
 	}
 
-	frameLen := uint16(len(src)) + 7
+	// The ADTS frame_length field is 13 bits wide and includes the 7-byte header.
+	n := len(src) + adtsHeaderLen
+	if n > maxADTSFrameLen {
+		return errAudioBufTooLarge
+	}
+	frameLen := uint16(n)
 
 	// first write adts header
 	parser.adtsHeader[0] = 0xff
 	parser.adtsHeader[1] = 0xf1
 
 	parser.adtsHeader[2] &= 0x00
-	parser.adtsHeader[2] = parser.adtsHeader[2] | (parser.cfgInfo.objectType-1)<<6
-	parser.adtsHeader[2] = parser.adtsHeader[2] | parser.cfgInfo.sampleRate<<2
+	parser.adtsHeader[2] |= (parser.cfgInfo.objectType - 1) << 6
+	parser.adtsHeader[2] |= parser.cfgInfo.sampleRate << 2
 
 	parser.adtsHeader[3] &= 0x00
-	parser.adtsHeader[3] = parser.adtsHeader[3] | (parser.cfgInfo.channel<<2)<<4
-	parser.adtsHeader[3] = parser.adtsHeader[3] | byte((frameLen<<3)>>14)
+	parser.adtsHeader[3] |= (parser.cfgInfo.channel << 2) << 4
+	parser.adtsHeader[3] |= byte((frameLen >> 11) & 0x03)
 
 	parser.adtsHeader[4] &= 0x00
-	parser.adtsHeader[4] = parser.adtsHeader[4] | byte((frameLen<<5)>>8)
+	parser.adtsHeader[4] |= byte((frameLen >> 3) & 0xff)
 
 	parser.adtsHeader[5] &= 0x00
-	parser.adtsHeader[5] = parser.adtsHeader[5] | byte(((frameLen<<13)>>13)<<5)
-	parser.adtsHeader[5] = parser.adtsHeader[5] | (0x7C<<1)>>3
+	parser.adtsHeader[5] |= byte(frameLen&0x07) << 5
+	parser.adtsHeader[5] |= (0x7C << 1) >> 3
 	parser.adtsHeader[6] = 0xfc
 
 	if _, err := w.Write(parser.adtsHeader[0:]); err != nil {
@@ -97,7 +104,7 @@ func (parser *Parser) adts(src []byte, w io.Writer) error {
 
 func (parser *Parser) SampleRate() int {
 	rate := 44100
-	if parser.cfgInfo.sampleRate <= byte(len(aacRates)-1) {
+	if int(parser.cfgInfo.sampleRate) < len(aacRates) {
 		rate = aacRates[parser.cfgInfo.sampleRate]
 	}
 	return rate
@@ -105,9 +112,9 @@ func (parser *Parser) SampleRate() int {
 
 func (parser *Parser) Parse(b []byte, packetType uint8, w io.Writer) (err error) {
 	switch packetType {
-	case av.AAC_SEQHDR:
+	case av.AACSeqHdr:
 		err = parser.specificInfo(b)
-	case av.AAC_RAW:
+	case av.AACRaw:
 		err = parser.adts(b, w)
 	}
 	return err

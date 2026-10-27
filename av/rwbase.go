@@ -30,9 +30,10 @@ func (rw *RWBaser) CalcBaseTimestamp() {
 }
 
 func (rw *RWBaser) RecTimeStamp(timestamp, typeID uint32) {
-	if typeID == TAG_VIDEO {
+	switch typeID {
+	case TagVideo:
 		rw.LastVideoTimestamp = timestamp
-	} else if typeID == TAG_AUDIO {
+	case TagAudio:
 		rw.LastAudioTimestamp = timestamp
 	}
 }
@@ -45,7 +46,7 @@ func (rw *RWBaser) SetPreTime() {
 
 func (rw *RWBaser) Alive() bool {
 	rw.lock.Lock()
-	b := !(time.Now().Sub(rw.PreTime) >= rw.timeout)
+	b := time.Since(rw.PreTime) < rw.timeout
 	rw.lock.Unlock()
 	return b
 }

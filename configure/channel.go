@@ -42,7 +42,7 @@ func Init() {
 	log.Info("Redis connected")
 }
 
-// set/reset a random key for channel.
+// SetKey sets or resets a random key for channel.
 func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 	if !saveInLocal {
 		for {
@@ -83,10 +83,10 @@ func (r *RoomKeysType) GetKey(channel string) (newKey string, err error) {
 		return newKey, err
 	}
 
-	var key any
-	var found bool
-	if key, found = r.localCache.Get(channel); found {
-		return key.(string), nil
+	if key, found := r.localCache.Get(channel); found {
+		if s, ok := key.(string); ok {
+			return s, nil
+		}
 	}
 	newKey, err = r.SetKey(channel)
 	log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
@@ -98,12 +98,12 @@ func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {
 		return r.redisCli.Get(key).Result()
 	}
 
-	chann, found := r.localCache.Get(key)
-	if found {
-		return chann.(string), nil
-	} else {
-		return "", fmt.Errorf("%s does not exists", key)
+	if chann, found := r.localCache.Get(key); found {
+		if s, ok := chann.(string); ok {
+			return s, nil
+		}
 	}
+	return "", fmt.Errorf("%s does not exists", key)
 }
 
 func (r *RoomKeysType) DeleteChannel(channel string) bool {
@@ -112,12 +112,14 @@ func (r *RoomKeysType) DeleteChannel(channel string) bool {
 	}
 
 	key, ok := r.localCache.Get(channel)
-	if ok {
-		r.localCache.Delete(channel)
-		r.localCache.Delete(key.(string))
-		return true
+	if !ok {
+		return false
 	}
-	return false
+	r.localCache.Delete(channel)
+	if s, ok := key.(string); ok {
+		r.localCache.Delete(s)
+	}
+	return true
 }
 
 func (r *RoomKeysType) DeleteKey(key string) bool {
@@ -126,10 +128,12 @@ func (r *RoomKeysType) DeleteKey(key string) bool {
 	}
 
 	channel, ok := r.localCache.Get(key)
-	if ok {
-		r.localCache.Delete(channel.(string))
-		r.localCache.Delete(key)
-		return true
+	if !ok {
+		return false
 	}
-	return false
+	if s, ok := channel.(string); ok {
+		r.localCache.Delete(s)
+	}
+	r.localCache.Delete(key)
+	return true
 }

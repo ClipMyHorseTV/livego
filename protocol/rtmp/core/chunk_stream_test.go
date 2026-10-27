@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestChunkRead1(t *testing.T) {
@@ -90,6 +91,6 @@ func TestWriteChunk(t *testing.T) {
 	w := NewReadWriter(bf, 1024)
 	err := chunkinc.writeChunk(w, 128)
 	w.Flush()
-	at.NoError(err)
+	require.NoError(t, err)
 	at.Len(bf.Bytes(), 321)
 }

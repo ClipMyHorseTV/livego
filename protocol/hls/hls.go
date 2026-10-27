@@ -55,25 +55,23 @@ func (server *Server) Serve(listener net.Listener) error {
 	})
 	server.listener = listener
 
-	if configure.Config.GetBool("use_hls_https") {
-		http.ServeTLS(listener, mux, "server.crt", "server.key")
-	} else {
-		http.Serve(listener, mux)
+	srv := &http.Server{
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
-
-	return nil
+	if configure.Config.GetBool("use_hls_https") {
+		return srv.ServeTLS(listener, "server.crt", "server.key")
+	}
+	return srv.Serve(listener)
 }
 
 func (server *Server) GetWriter(info av.Info) av.WriteCloser {
-	var s *Source
-	v, ok := server.conns.Load(info.Key)
-	if !ok {
-		log.Debug("new hls source")
-		s = NewSource(info)
-		server.conns.Store(info.Key, s)
-	} else {
-		s = v.(*Source)
+	if s := server.getConn(info.Key); s != nil {
+		return s
 	}
+	log.Debug("new hls source")
+	s := NewSource(info)
+	server.conns.Store(info.Key, s)
 	return s
 }
 
@@ -82,7 +80,11 @@ func (server *Server) getConn(key string) *Source {
 	if !ok {
 		return nil
 	}
-	return v.(*Source)
+	s, ok := v.(*Source)
+	if !ok {
+		return nil
+	}
+	return s
 }
 
 func (server *Server) checkStop() {
@@ -90,7 +92,10 @@ func (server *Server) checkStop() {
 		<-time.After(5 * time.Second)
 
 		server.conns.Range(func(key, val any) bool {
-			v := val.(*Source)
+			v, ok := val.(*Source)
+			if !ok {
+				return true
+			}
 			if !v.Alive() && !configure.Config.GetBool("hls_keep_after_end") {
 				log.Debug("check stop and remove: ", v.Info())
 				server.conns.Delete(key)
@@ -103,12 +108,12 @@ func (server *Server) checkStop() {
 func (server *Server) handle(w http.ResponseWriter, r *http.Request) {
 	if path.Base(r.URL.Path) == "crossdomain.xml" {
 		w.Header().Set("Content-Type", "application/xml")
-		w.Write(crossdomainxml)
+		writeBody(w, crossdomainxml)
 		return
 	}
 	switch path.Ext(r.URL.Path) {
 	case ".m3u8":
-		key, _ := server.parseM3u8(r.URL.Path)
+		key := server.parseM3u8(r.URL.Path)
 		conn := server.getConn(key)
 		if conn == nil {
 			http.Error(w, ErrNoPublisher.Error(), http.StatusForbidden)
@@ -130,7 +135,7 @@ func (server *Server) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Content-Type", "application/x-mpegURL")
 		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
-		w.Write(body)
+		writeBody(w, body)
 	case ".ts":
 		key, _ := server.parseTs(r.URL.Path)
 		conn := server.getConn(key)
@@ -148,14 +153,22 @@ func (server *Server) handle(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "video/mp2ts")
 		w.Header().Set("Content-Length", strconv.Itoa(len(item.Data)))
-		w.Write(item.Data)
+		writeBody(w, item.Data)
 	}
 }
 
-func (server *Server) parseM3u8(pathstr string) (key string, err error) {
+// writeBody writes a response body; a failed write means the client went away, so it is only logged.
+func writeBody(w http.ResponseWriter, body []byte) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	//nolint:gosec // G705: body is a TS segment or M3U8 playlist served with an explicit media Content-Type and nosniff, never HTML.
+	if _, err := w.Write(body); err != nil {
+		log.Debug("hls: write response: ", err)
+	}
+}
+
+func (server *Server) parseM3u8(pathstr string) string {
 	pathstr = strings.TrimLeft(pathstr, "/")
-	key = strings.Split(pathstr, path.Ext(pathstr))[0]
-	return key, err
+	return strings.Split(pathstr, path.Ext(pathstr))[0]
 }
 
 func (server *Server) parseTs(pathstr string) (key string, err error) {
