@@ -100,7 +100,8 @@ jobs:
       - name: Publish to badges branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Force-pushes a single commit so the branch never accumulates history.
+        # Only ever writes the badges branch, never main. Force-pushes a single
+        # commit so the branch never accumulates history.
         run: |
           dir=$(mktemp -d)
           mv coverage.json "$dir/"
@@ -110,4 +111,4 @@ jobs:
           git -c user.name='github-actions[bot]' \
             -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -q -m "Update coverage badge"
-          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/badges
