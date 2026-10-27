@@ -34,10 +34,17 @@ jobs:
       - name: Coverage summary
         if: matrix.name == 'stable'
         run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $NF}')
+          # shields.io endpoint badge, published to the badges branch by the coverage-badge job.
+          awk -v total="$total" 'BEGIN {
+            pct = total + 0
+            color = pct >= 80 ? "brightgreen" : pct >= 60 ? "yellow" : pct >= 40 ? "orange" : "red"
+            printf "{\"schemaVersion\":1,\"label\":\"coverage\",\"message\":\"%s\",\"color\":\"%s\"}\n", total, color
+          }' > coverage.json
           {
             echo '### Coverage'
             echo
-            go tool cover -func=coverage.out | awk '/^total:/ {print "Total: **" $NF "**"}'
+            echo "Total: **$total**"
             echo
             echo '<details><summary>Per package</summary>'
             echo
@@ -64,6 +71,12 @@ jobs:
         with:
           header: coverage
           path: coverage.md
+      - name: Upload coverage badge
+        if: matrix.name == 'stable' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badge
+          path: coverage.json
       - name: Annotate coverage
         if: matrix.name == 'stable' && github.event_name == 'pull_request'
         uses: ggilder/codecoverage@v1
@@ -71,3 +84,30 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COVERAGE_FILE_PATH: coverage.out
           COVERAGE_FORMAT: go
+
+  coverage-badge:
+    name: Coverage badge
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download coverage badge
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-badge
+      - name: Publish to badges branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Force-pushes a single commit so the branch never accumulates history.
+        run: |
+          dir=$(mktemp -d)
+          mv coverage.json "$dir/"
+          cd "$dir"
+          git init -q -b badges
+          git add coverage.json
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Update coverage badge"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

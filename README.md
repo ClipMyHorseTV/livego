@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/ClipMyHorseTV/livego/actions/workflows/test.yml"><img src="https://github.com/ClipMyHorseTV/livego/actions/workflows/test.yml/badge.svg" alt="Test" /></a>
+  <a href="https://github.com/ClipMyHorseTV/livego/actions/workflows/test.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ClipMyHorseTV/livego/badges/coverage.json" alt="Coverage" /></a>
   <a href="https://github.com/ClipMyHorseTV/livego/actions/workflows/codeql.yml"><img src="https://github.com/ClipMyHorseTV/livego/actions/workflows/codeql.yml/badge.svg" alt="CodeQL Advanced" /></a>
   <a href="https://pkg.go.dev/github.com/ClipMyHorseTV/livego"><img src="https://pkg.go.dev/badge/github.com/ClipMyHorseTV/livego.svg" alt="Go Reference" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>

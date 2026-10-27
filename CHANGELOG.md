@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make lint`, `make fmt` and `make install-dev` targets.
 - `core.MessageLength` to validate RTMP message lengths.
 - Dependency review workflow for pull requests.
+- Test coverage summary as a PR comment, and a coverage badge in the README.
 - Tests for the API JWT middleware.
 
 ### Changed
