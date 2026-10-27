@@ -2,6 +2,7 @@ package hls
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"time"
 
@@ -20,11 +21,12 @@ const (
 	aacSampleLen = 1024
 	maxQueueNum  = 512
 
-	h264_default_hz uint64 = 90
+	h264DefaultHz uint64 = 90
 )
 
 type Source struct {
 	av.RWBaser
+
 	seq         int
 	info        av.Info
 	bwriter     *bytes.Buffer
@@ -72,7 +74,7 @@ func (source *Source) GetCacheInc() *TSCacheItem {
 
 func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Warningf("[%v] packet queue max!!!", info)
-	for i := 0; i < maxQueueNum-84; i++ {
+	for range maxQueueNum - 84 {
 		tmpPkt, ok := <-pktQue
 		// try to don't drop audio
 		if ok && tmpPkt.IsAudio {
@@ -93,7 +95,6 @@ func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 				<-pktQue
 			}
 		}
-
 	}
 	log.Debug("packet queue len: ", len(pktQue))
 }
@@ -101,8 +102,8 @@ func (source *Source) DropPacket(pktQue chan *av.Packet, info av.Info) {
 func (source *Source) Write(p *av.Packet) (err error) {
 	err = nil
 	if source.closed {
-		err = fmt.Errorf("hls source closed")
-		return
+		err = errors.New("hls source closed")
+		return err
 	}
 	source.SetPreTime()
 	defer func() {
@@ -112,12 +113,10 @@ func (source *Source) Write(p *av.Packet) (err error) {
 	}()
 	if len(source.packetQueue) >= maxQueueNum-24 {
 		source.DropPacket(source.packetQueue, source.info)
-	} else {
-		if !source.closed {
-			source.packetQueue <- p
-		}
+	} else if !source.closed {
+		source.packetQueue <- p
 	}
-	return
+	return err
 }
 
 func (source *Source) SendPacket() error {
@@ -131,41 +130,51 @@ func (source *Source) SendPacket() error {
 	log.Debugf("[%v] hls sender start", source.info)
 	for {
 		if source.closed {
-			return fmt.Errorf("closed")
+			return errors.New("closed")
 		}
 
 		p, ok := <-source.packetQueue
-		if ok {
-			if p.IsMetadata {
-				continue
-			}
-
-			err := source.demuxer.Demux(p)
-			if err == flv.ErrAvcEndSEQ {
-				log.Warning(err)
-				continue
-			} else {
-				if err != nil {
-					log.Warning(err)
-					return err
-				}
-			}
-			compositionTime, isSeq, err := source.parse(p)
-			if err != nil {
-				log.Warning(err)
-			}
-			if err != nil || isSeq {
-				continue
-			}
-			if source.btswriter != nil {
-				source.stat.update(p.IsVideo, p.TimeStamp)
-				source.calcPtsDts(p.IsVideo, p.TimeStamp, uint32(compositionTime))
-				source.tsMux(p)
-			}
-		} else {
-			return fmt.Errorf("closed")
+		if !ok {
+			return errors.New("closed")
+		}
+		if err := source.sendPacket(p); err != nil {
+			return err
 		}
 	}
+}
+
+// sendPacket demuxes and parses one packet and muxes it into the current TS segment.
+// Only demuxer errors are returned; they stop the sender.
+func (source *Source) sendPacket(p *av.Packet) error {
+	if p.IsMetadata {
+		return nil
+	}
+
+	err := source.demuxer.Demux(p)
+	if errors.Is(err, flv.ErrAvcEndSEQ) {
+		log.Warning(err)
+		return nil
+	}
+	if err != nil {
+		log.Warning(err)
+		return err
+	}
+
+	compositionTime, isSeq, err := source.parse(p)
+	if err != nil {
+		log.Warning(err)
+		return nil
+	}
+	if isSeq || source.btswriter == nil {
+		return nil
+	}
+
+	source.stat.update(p.IsVideo, p.TimeStamp)
+	source.calcPtsDts(p.IsVideo, p.TimeStamp, compositionTime)
+	if err := source.tsMux(p); err != nil {
+		log.Warning("hls: mux packet: ", err)
+	}
+	return nil
 }
 
 func (source *Source) Info() (ret av.Info) {
@@ -190,10 +199,13 @@ func (source *Source) Close(err error) {
 
 func (source *Source) cut() {
 	newf := true
-	if source.btswriter == nil {
+	switch {
+	case source.btswriter == nil:
 		source.btswriter = bytes.NewBuffer(nil)
-	} else if source.btswriter != nil && source.stat.durationMs() >= duration {
-		source.flushAudio()
+	case source.stat.durationMs() >= duration:
+		if err := source.flushAudio(); err != nil {
+			log.Warning("hls: flush audio: ", err)
+		}
 
 		source.seq++
 		filename := fmt.Sprintf("/%s/%d.ts", source.info.Key, time.Now().Unix())
@@ -202,36 +214,29 @@ func (source *Source) cut() {
 
 		source.btswriter.Reset()
 		source.stat.resetAndNew()
-	} else {
+	default:
 		newf = false
 	}
 	if newf {
 		source.btswriter.Write(source.muxer.PAT())
-		source.btswriter.Write(source.muxer.PMT(av.SOUND_AAC, true))
+		source.btswriter.Write(source.muxer.PMT(av.SoundAAC, true))
 	}
 }
 
 func (source *Source) parse(p *av.Packet) (int32, bool, error) {
 	var compositionTime int32
-	var ah av.AudioPacketHeader
-	var vh av.VideoPacketHeader
+	var isSeq bool
+	var err error
 	if p.IsVideo {
-		vh = p.Header.(av.VideoPacketHeader)
-		if vh.CodecID() != av.VIDEO_H264 {
-			return compositionTime, false, ErrNoSupportVideoCodec
-		}
-		compositionTime = vh.CompositionTime()
-		if vh.IsKeyFrame() && vh.IsSeq() {
-			return compositionTime, true, source.tsparser.Parse(p, source.bwriter)
-		}
+		compositionTime, isSeq, err = videoHeaderInfo(p)
 	} else {
-		ah = p.Header.(av.AudioPacketHeader)
-		if ah.SoundFormat() != av.SOUND_AAC {
-			return compositionTime, false, ErrNoSupportAudioCodec
-		}
-		if ah.AACPacketType() == av.AAC_SEQHDR {
-			return compositionTime, true, source.tsparser.Parse(p, source.bwriter)
-		}
+		isSeq, err = audioHeaderInfo(p)
+	}
+	if err != nil {
+		return compositionTime, false, err
+	}
+	if isSeq {
+		return compositionTime, true, source.tsparser.Parse(p, source.bwriter)
 	}
 	source.bwriter.Reset()
 	if err := source.tsparser.Parse(p, source.bwriter); err != nil {
@@ -239,22 +244,53 @@ func (source *Source) parse(p *av.Packet) (int32, bool, error) {
 	}
 	p.Data = source.bwriter.Bytes()
 
-	if p.IsVideo && vh.IsKeyFrame() {
-		source.cut()
+	if p.IsVideo {
+		if vh, ok := p.Header.(av.VideoPacketHeader); ok && vh.IsKeyFrame() {
+			source.cut()
+		}
 	}
 	return compositionTime, false, nil
 }
 
-func (source *Source) calcPtsDts(isVideo bool, ts, compositionTs uint32) {
-	source.dts = uint64(ts) * h264_default_hz
-	if isVideo {
-		source.pts = source.dts + uint64(compositionTs)*h264_default_hz
-	} else {
-		sampleRate, _ := source.tsparser.SampleRate()
-		source.align.align(&source.dts, uint32(videoHZ*aacSampleLen/sampleRate))
-		source.pts = source.dts
+// videoHeaderInfo checks that p is H.264 and returns its composition time and whether it is
+// a sequence header.
+func videoHeaderInfo(p *av.Packet) (int32, bool, error) {
+	vh, ok := p.Header.(av.VideoPacketHeader)
+	if !ok || vh.CodecID() != av.VideoH264 {
+		return 0, false, ErrNoSupportVideoCodec
 	}
+	return vh.CompositionTime(), vh.IsKeyFrame() && vh.IsSeq(), nil
 }
+
+// audioHeaderInfo checks that p is AAC and returns whether it is a sequence header.
+func audioHeaderInfo(p *av.Packet) (bool, error) {
+	ah, ok := p.Header.(av.AudioPacketHeader)
+	if !ok || ah.SoundFormat() != av.SoundAAC {
+		return false, ErrNoSupportAudioCodec
+	}
+	return ah.AACPacketType() == av.AACSeqHdr, nil
+}
+
+func (source *Source) calcPtsDts(isVideo bool, ts uint32, compositionTs int32) {
+	source.dts = uint64(ts) * h264DefaultHz
+	source.pts = source.dts
+	if isVideo {
+		// a negative composition time offset is not supported and treated as 0
+		if compositionTs > 0 {
+			source.pts += uint64(compositionTs) * h264DefaultHz
+		}
+		return
+	}
+
+	sampleRate, err := source.tsparser.SampleRate()
+	if err != nil || sampleRate <= 0 {
+		return
+	}
+	frameDuration := uint64(videoHZ*aacSampleLen) / uint64(sampleRate)
+	source.align.align(&source.dts, frameDuration)
+	source.pts = source.dts
+}
+
 func (source *Source) flushAudio() error {
 	return source.muxAudio(1)
 }
@@ -266,15 +302,14 @@ func (source *Source) muxAudio(limit byte) error {
 	var p av.Packet
 	_, pts, buf := source.cache.GetFrame()
 	p.Data = buf
-	p.TimeStamp = uint32(pts / h264_default_hz)
+	p.TimeStamp = uint32((pts / h264DefaultHz) & 0xffffffff) // FLV timestamps wrap at 32 bits
 	return source.muxer.Mux(&p, source.btswriter)
 }
 
 func (source *Source) tsMux(p *av.Packet) error {
 	if p.IsVideo {
 		return source.muxer.Mux(p, source.btswriter)
-	} else {
-		source.cache.Cache(p.Data, source.pts)
-		return source.muxAudio(cache_max_frames)
 	}
+	source.cache.Cache(p.Data, source.pts)
+	return source.muxAudio(cacheMaxFrames)
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/binary"
+	"fmt"
 	"net"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 
 type Conn struct {
 	net.Conn
+
 	chunkSize           uint32
 	remoteChunkSize     uint32
 	windowAckSize       uint32
@@ -75,9 +77,7 @@ func (conn *Conn) Read(c *ChunkStream) error {
 	}
 
 	conn.handleControlMsg(c)
-	conn.ack(c.Length)
-
-	return nil
+	return conn.ack(c.Length)
 }
 
 func (conn *Conn) Write(c *ChunkStream) error {
@@ -126,24 +126,26 @@ func (conn *Conn) NewSetPeerBandwidth(size uint32) ChunkStream {
 }
 
 func (conn *Conn) handleControlMsg(c *ChunkStream) {
-	if c.TypeID == idSetChunkSize {
+	switch c.TypeID {
+	case idSetChunkSize:
 		conn.remoteChunkSize = binary.BigEndian.Uint32(c.Data)
-	} else if c.TypeID == idWindowAckSize {
+	case idWindowAckSize:
 		conn.remoteWindowAckSize = binary.BigEndian.Uint32(c.Data)
 	}
 }
 
-func (conn *Conn) ack(size uint32) {
-	conn.received += uint32(size)
-	conn.ackReceived += uint32(size)
+func (conn *Conn) ack(size uint32) error {
+	conn.received += size
+	conn.ackReceived += size
 	if conn.received >= 0xf0000000 {
 		conn.received = 0
 	}
 	if conn.ackReceived >= conn.remoteWindowAckSize {
 		cs := conn.NewAck(conn.ackReceived)
-		cs.writeChunk(conn.rw, int(conn.chunkSize))
 		conn.ackReceived = 0
+		return cs.writeChunk(conn.rw, int(conn.chunkSize))
 	}
+	return nil
 }
 
 func initControlMsg(id, size, value uint32) ChunkStream {
@@ -191,18 +193,27 @@ func (conn *Conn) userControlMsg(eventType, buflen uint32) ChunkStream {
 	return ret
 }
 
-func (conn *Conn) SetBegin() {
+// SetBegin sends a StreamBegin user control event for stream 1.
+func (conn *Conn) SetBegin() error {
 	ret := conn.userControlMsg(streamBegin, 4)
-	for i := 0; i < 4; i++ {
-		ret.Data[2+i] = byte(1 >> uint32((3-i)*8) & 0xff)
-	}
-	conn.Write(&ret)
+	binary.BigEndian.PutUint32(ret.Data[2:], 1)
+	return conn.Write(&ret)
 }
 
-func (conn *Conn) SetRecorded() {
+// SetRecorded sends a StreamIsRecorded user control event for stream 1.
+func (conn *Conn) SetRecorded() error {
 	ret := conn.userControlMsg(streamIsRecorded, 4)
-	for i := 0; i < 4; i++ {
-		ret.Data[2+i] = byte(1 >> uint32((3-i)*8) & 0xff)
+	binary.BigEndian.PutUint32(ret.Data[2:], 1)
+	return conn.Write(&ret)
+}
+
+// maxMessageLen is the largest message length the 24-bit RTMP message header can carry.
+const maxMessageLen = 0xffffff
+
+// MessageLength returns n as an RTMP message length, or an error if it does not fit in 24 bits.
+func MessageLength(n int) (uint32, error) {
+	if n < 0 || n > maxMessageLen {
+		return 0, fmt.Errorf("rtmp message too large: %d bytes", n)
 	}
-	conn.Write(&ret)
+	return uint32(n), nil
 }

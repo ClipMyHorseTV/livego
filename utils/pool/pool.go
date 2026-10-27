@@ -5,7 +5,7 @@ import "sync"
 const maxpoolsize = 500 * 1024
 
 var bytePool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		b := make([]byte, maxpoolsize)
 		return &b
 	},
@@ -15,7 +15,10 @@ func Get(size int) []byte {
 	if size > maxpoolsize {
 		return make([]byte, size)
 	}
-	ptr := bytePool.Get().(*[]byte)
+	ptr, ok := bytePool.Get().(*[]byte)
+	if !ok {
+		return make([]byte, size)
+	}
 	b := *ptr
 	return b[:size]
 }

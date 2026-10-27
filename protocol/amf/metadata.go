@@ -2,6 +2,7 @@ package amf
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	log "github.com/sirupsen/logrus"
@@ -17,15 +18,16 @@ const (
 	OnMetaData   string = "onMetaData"
 )
 
-var setFrameFrame []byte
+// setFrameFrame is SetDataFrame encoded as an AMF0 string.
+var setFrameFrame = encodeSetDataFrame()
 
-func init() {
+func encodeSetDataFrame() []byte {
 	b := bytes.NewBuffer(nil)
 	encoder := &Encoder{}
 	if _, err := encoder.Encode(b, SetDataFrame, AMF0); err != nil {
 		log.Fatal(err)
 	}
-	setFrameFrame = b.Bytes()
+	return b.Bytes()
 }
 
 func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
@@ -37,9 +39,9 @@ func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			vv := v.(string)
+			vv := v
 			if vv != SetDataFrame {
 				tmplen := len(setFrameFrame)
 				b := make([]byte, tmplen+len(p))
@@ -48,21 +50,21 @@ func MetaDataReform(p []byte, flag uint8) ([]byte, error) {
 				p = b
 			}
 		default:
-			return nil, fmt.Errorf("setFrameFrame error")
+			return nil, errors.New("setFrameFrame error")
 		}
 	case DEL:
 		v, err := decoder.Decode(r, AMF0)
 		if err != nil {
 			return nil, err
 		}
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			vv := v.(string)
+			vv := v
 			if vv == SetDataFrame {
 				p = p[len(setFrameFrame):]
 			}
 		default:
-			return nil, fmt.Errorf("metadata error")
+			return nil, errors.New("metadata error")
 		}
 	default:
 		return nil, fmt.Errorf("invalid flag:%d", flag)

@@ -1,6 +1,7 @@
 package rtmprelay
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -12,179 +13,186 @@ import (
 )
 
 type StaticPush struct {
-	RtmpUrl       string
-	packet_chan   chan *av.Packet
-	sndctrl_chan  chan string
+	RtmpURL       string
+	packetChan    chan *av.Packet
+	sndctrlChan   chan string
 	connectClient *core.ConnClient
 	startflag     bool
 }
 
-var G_StaticPushMap = make(map[string](*StaticPush))
-var g_MapLock = new(sync.RWMutex)
-var G_PushUrlList []string = nil
-
 var (
-	STATIC_RELAY_STOP_CTRL = "STATIC_RTMPRELAY_STOP"
+	StaticPushMap          = make(map[string](*StaticPush))
+	mapLock                = new(sync.RWMutex)
+	PushURLList   []string = nil
 )
 
+var StaticRelayStopCtrl = "STATIC_RTMPRELAY_STOP"
+
 func GetStaticPushList(appname string) ([]string, error) {
-	if G_PushUrlList == nil {
+	if PushURLList == nil {
 		// Do not unmarshel the config every time, lots of reflect works -gs
-		pushurlList, ok := configure.GetStaticPushUrlList(appname)
+		pushurlList, ok := configure.GetStaticPushURLList(appname)
 		if !ok {
-			G_PushUrlList = []string{}
+			PushURLList = []string{}
 		} else {
-			G_PushUrlList = pushurlList
+			PushURLList = pushurlList
 		}
 	}
 
-	if len(G_PushUrlList) == 0 {
-		return nil, fmt.Errorf("no static push url")
+	if len(PushURLList) == 0 {
+		return nil, errors.New("no static push url")
 	}
 
-	return G_PushUrlList, nil
+	return PushURLList, nil
 }
 
 func GetAndCreateStaticPushObject(rtmpurl string) *StaticPush {
-	g_MapLock.RLock()
-	staticpush, ok := G_StaticPushMap[rtmpurl]
+	mapLock.RLock()
+	staticpush, ok := StaticPushMap[rtmpurl]
 	log.Debugf("GetAndCreateStaticPushObject: %s, return %v", rtmpurl, ok)
 	if !ok {
-		g_MapLock.RUnlock()
+		mapLock.RUnlock()
 		newStaticpush := NewStaticPush(rtmpurl)
 
-		g_MapLock.Lock()
-		G_StaticPushMap[rtmpurl] = newStaticpush
-		g_MapLock.Unlock()
+		mapLock.Lock()
+		StaticPushMap[rtmpurl] = newStaticpush
+		mapLock.Unlock()
 
 		return newStaticpush
 	}
-	g_MapLock.RUnlock()
+	mapLock.RUnlock()
 
 	return staticpush
 }
 
 func GetStaticPushObject(rtmpurl string) (*StaticPush, error) {
-	g_MapLock.RLock()
-	if staticpush, ok := G_StaticPushMap[rtmpurl]; ok {
-		g_MapLock.RUnlock()
+	mapLock.RLock()
+	if staticpush, ok := StaticPushMap[rtmpurl]; ok {
+		mapLock.RUnlock()
 		return staticpush, nil
 	}
-	g_MapLock.RUnlock()
+	mapLock.RUnlock()
 
-	return nil, fmt.Errorf("G_StaticPushMap[%s] not exist....", rtmpurl)
+	return nil, fmt.Errorf("StaticPushMap[%s] does not exist", rtmpurl)
 }
 
 func ReleaseStaticPushObject(rtmpurl string) {
-	g_MapLock.RLock()
-	if _, ok := G_StaticPushMap[rtmpurl]; ok {
-		g_MapLock.RUnlock()
+	mapLock.RLock()
+	if _, ok := StaticPushMap[rtmpurl]; ok {
+		mapLock.RUnlock()
 
 		log.Debugf("ReleaseStaticPushObject %s ok", rtmpurl)
-		g_MapLock.Lock()
-		delete(G_StaticPushMap, rtmpurl)
-		g_MapLock.Unlock()
+		mapLock.Lock()
+		delete(StaticPushMap, rtmpurl)
+		mapLock.Unlock()
 	} else {
-		g_MapLock.RUnlock()
+		mapLock.RUnlock()
 		log.Debugf("ReleaseStaticPushObject: not find %s", rtmpurl)
 	}
 }
 
 func NewStaticPush(rtmpurl string) *StaticPush {
 	return &StaticPush{
-		RtmpUrl:       rtmpurl,
-		packet_chan:   make(chan *av.Packet, 500),
-		sndctrl_chan:  make(chan string),
+		RtmpURL:       rtmpurl,
+		packetChan:    make(chan *av.Packet, 500),
+		sndctrlChan:   make(chan string),
 		connectClient: nil,
 		startflag:     false,
 	}
 }
 
-func (self *StaticPush) Start() error {
-	if self.startflag {
-		return fmt.Errorf("StaticPush already start %s", self.RtmpUrl)
+func (sp *StaticPush) Start() error {
+	if sp.startflag {
+		return fmt.Errorf("StaticPush already start %s", sp.RtmpURL)
 	}
 
-	self.connectClient = core.NewConnClient()
+	sp.connectClient = core.NewConnClient()
 
-	log.Debugf("static publish server addr:%v starting....", self.RtmpUrl)
-	err := self.connectClient.Start(self.RtmpUrl, "publish")
+	log.Debugf("static publish server addr:%v starting....", sp.RtmpURL)
+	err := sp.connectClient.Start(sp.RtmpURL, "publish")
 	if err != nil {
-		log.Debugf("connectClient.Start url=%v error", self.RtmpUrl)
+		log.Debugf("connectClient.Start url=%v error", sp.RtmpURL)
 		return err
 	}
-	log.Debugf("static publish server addr:%v started, streamid=%d", self.RtmpUrl, self.connectClient.GetStreamId())
-	go self.HandleAvPacket()
+	log.Debugf("static publish server addr:%v started, streamid=%d", sp.RtmpURL, sp.connectClient.GetStreamID())
+	go sp.HandleAvPacket()
 
-	self.startflag = true
+	sp.startflag = true
 	return nil
 }
 
-func (self *StaticPush) Stop() {
-	if !self.startflag {
+func (sp *StaticPush) Stop() {
+	if !sp.startflag {
 		return
 	}
 
-	log.Debugf("StaticPush Stop: %s", self.RtmpUrl)
-	self.sndctrl_chan <- STATIC_RELAY_STOP_CTRL
-	self.startflag = false
+	log.Debugf("StaticPush Stop: %s", sp.RtmpURL)
+	sp.sndctrlChan <- StaticRelayStopCtrl
+	sp.startflag = false
 }
 
-func (self *StaticPush) WriteAvPacket(packet *av.Packet) {
-	if !self.startflag {
+func (sp *StaticPush) WriteAvPacket(packet *av.Packet) {
+	if !sp.startflag {
 		return
 	}
 
-	self.packet_chan <- packet
+	sp.packetChan <- packet
 }
 
-func (self *StaticPush) sendPacket(p *av.Packet) {
-	if !self.startflag {
+func (sp *StaticPush) sendPacket(p *av.Packet) {
+	if !sp.startflag {
 		return
 	}
 	var cs core.ChunkStream
 
+	length, err := core.MessageLength(len(p.Data))
+	if err != nil {
+		log.Debugf("static push %s: %v", sp.RtmpURL, err)
+		return
+	}
 	cs.Data = p.Data
-	cs.Length = uint32(len(p.Data))
-	cs.StreamID = self.connectClient.GetStreamId()
+	cs.Length = length
+	cs.StreamID = sp.connectClient.GetStreamID()
 	cs.Timestamp = p.TimeStamp
-	//cs.Timestamp += v.BaseTimeStamp()
+	// cs.Timestamp += v.BaseTimeStamp()
 
-	//log.Printf("Static sendPacket: rtmpurl=%s, length=%d, streamid=%d",
+	// log.Printf("Static sendPacket: rtmpurl=%s, length=%d, streamid=%d",
 	//	self.RtmpUrl, len(p.Data), cs.StreamID)
 	if p.IsVideo {
-		cs.TypeID = av.TAG_VIDEO
+		cs.TypeID = av.TagVideo
 	} else {
 		if p.IsMetadata {
-			cs.TypeID = av.TAG_SCRIPTDATAAMF0
+			cs.TypeID = av.TagScriptDataAMF0
 		} else {
-			cs.TypeID = av.TAG_AUDIO
+			cs.TypeID = av.TagAudio
 		}
 	}
 
-	self.connectClient.Write(cs)
+	if err := sp.connectClient.Write(cs); err != nil {
+		log.Debugf("static push %s write: %v", sp.RtmpURL, err)
+	}
 }
 
-func (self *StaticPush) HandleAvPacket() {
-	if !self.IsStart() {
-		log.Debugf("static push %s not started", self.RtmpUrl)
+func (sp *StaticPush) HandleAvPacket() {
+	if !sp.IsStart() {
+		log.Debugf("static push %s not started", sp.RtmpURL)
 		return
 	}
 
 	for {
 		select {
-		case packet := <-self.packet_chan:
-			self.sendPacket(packet)
-		case ctrlcmd := <-self.sndctrl_chan:
-			if ctrlcmd == STATIC_RELAY_STOP_CTRL {
-				self.connectClient.Close(nil)
-				log.Debugf("Static HandleAvPacket close: publishurl=%s", self.RtmpUrl)
+		case packet := <-sp.packetChan:
+			sp.sendPacket(packet)
+		case ctrlcmd := <-sp.sndctrlChan:
+			if ctrlcmd == StaticRelayStopCtrl {
+				sp.connectClient.Close(nil)
+				log.Debugf("Static HandleAvPacket close: publishurl=%s", sp.RtmpURL)
 				return
 			}
 		}
 	}
 }
 
-func (self *StaticPush) IsStart() bool {
-	return self.startflag
+func (sp *StaticPush) IsStart() bool {
+	return sp.startflag
 }

@@ -7,6 +7,7 @@ import (
 
 type ReadWriter struct {
 	*bufio.ReadWriter
+
 	readError  error
 	writeError error
 }
@@ -35,7 +36,7 @@ func (rw *ReadWriter) ReadUintBE(n int) (uint32, error) {
 		return 0, rw.readError
 	}
 	ret := uint32(0)
-	for i := 0; i < n; i++ {
+	for range n {
 		b, err := rw.ReadByte()
 		if err != nil {
 			rw.readError = err
@@ -51,7 +52,7 @@ func (rw *ReadWriter) ReadUintLE(n int) (uint32, error) {
 		return 0, rw.readError
 	}
 	ret := uint32(0)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		b, err := rw.ReadByte()
 		if err != nil {
 			rw.readError = err
@@ -88,8 +89,8 @@ func (rw *ReadWriter) WriteUintBE(v uint32, n int) error {
 	if rw.writeError != nil {
 		return rw.writeError
 	}
-	for i := 0; i < n; i++ {
-		b := byte(v>>uint32((n-i-1)<<3)) & 0xff
+	for i := range n {
+		b := byte((v >> ((n - i - 1) << 3)) & 0xff)
 		if err := rw.WriteByte(b); err != nil {
 			rw.writeError = err
 			return err
@@ -102,13 +103,13 @@ func (rw *ReadWriter) WriteUintLE(v uint32, n int) error {
 	if rw.writeError != nil {
 		return rw.writeError
 	}
-	for i := 0; i < n; i++ {
+	for range n {
 		b := byte(v) & 0xff
 		if err := rw.WriteByte(b); err != nil {
 			rw.writeError = err
 			return err
 		}
-		v = v >> 8
+		v >>= 8
 	}
 	return nil
 }

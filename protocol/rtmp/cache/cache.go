@@ -22,36 +22,30 @@ func NewCache() *Cache {
 }
 
 func (cache *Cache) Write(p av.Packet) {
-	if p.IsMetadata {
+	switch {
+	case p.IsMetadata:
 		cache.metadata.Write(&p)
-		return
-	} else {
-		if !p.IsVideo {
-			ah, ok := p.Header.(av.AudioPacketHeader)
-			if ok {
-				if ah.SoundFormat() == av.SOUND_AAC &&
-					ah.AACPacketType() == av.AAC_SEQHDR {
-					cache.audioSeq.Write(&p)
-					return
-				} else {
-					return
-				}
-			}
-
-		} else {
-			vh, ok := p.Header.(av.VideoPacketHeader)
-			if ok {
-				if vh.IsSeq() {
-					cache.videoSeq.Write(&p)
-					return
-				}
-			} else {
-				return
-			}
-
+	case p.IsVideo:
+		vh, ok := p.Header.(av.VideoPacketHeader)
+		if !ok {
+			return
+		}
+		if vh.IsSeq() {
+			cache.videoSeq.Write(&p)
+			return
+		}
+		cache.gop.Write(&p)
+	default:
+		ah, ok := p.Header.(av.AudioPacketHeader)
+		if !ok {
+			cache.gop.Write(&p)
+			return
+		}
+		// only the AAC sequence header is cached, other audio packets are not
+		if ah.SoundFormat() == av.SoundAAC && ah.AACPacketType() == av.AACSeqHdr {
+			cache.audioSeq.Write(&p)
 		}
 	}
-	cache.gop.Write(&p)
 }
 
 func (cache *Cache) Send(w av.WriteCloser) error {

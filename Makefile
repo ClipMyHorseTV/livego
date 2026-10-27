@@ -1,36 +1,40 @@
-GOCMD ?= go
-GOBUILD = $(GOCMD) build
-GOCLEAN = $(GOCMD) clean
-GOTEST = $(GOCMD) test
-GOGET = $(GOCMD) get
-BINARY_NAME = livego
-BINARY_UNIX = $(BINARY_NAME)_unix
+GO ?= go
+GO_MIN ?= go1.22.12
+GOBIN ?= $(shell $(GO) env GOPATH)/bin
+GOLANGCI_LINT_VERSION ?= v2.15.0
 
-DOCKER_ACC ?= gwuhaolin
-DOCKER_REPO ?= livego
+.PHONY: all
+all: test build
 
-TAG ?= $(shell git describe --tags --abbrev=0 2>/dev/null)
-
-default: all
-
-all: test build dockerize
+.PHONY: build
 build:
-	$(GOBUILD) -o $(BINARY_NAME) -v -ldflags="-X main.VERSION=$(TAG)"
+	$(GO) build ./...
 
+.PHONY: test
 test:
-	$(GOTEST) -v ./...
+	gotestsum --junitfile test-results.xml --format testname -- -v -coverprofile=coverage.out -covermode=atomic ./...
+	@go tool cover -func=coverage.out | grep total | awk '{print "Total coverage: " $$3}'
 
+# Runs the tests with the oldest supported Go version (downloaded on first use).
+.PHONY: test-min
+test-min:
+	GOTOOLCHAIN=$(GO_MIN) $(GO) test -v ./...
+
+.PHONY: lint
+lint:
+	$(GOBIN)/golangci-lint run ./...
+
+.PHONY: fmt
+fmt:
+	$(GOBIN)/golangci-lint fmt ./...
+	$(GOBIN)/golangci-lint run --fix ./...
+
+.PHONY: install-dev
+install-dev:
+	curl -sSfL https://golangci-lint.run/install.sh | sh -s -- -b $(GOBIN) $(GOLANGCI_LINT_VERSION)
+	$(GOBIN)/golangci-lint --version
+
+.PHONY: clean
 clean:
-	$(GOCLEAN)
-	rm -f $(BINARY_NAME)
-	rm -f $(BINARY_UNIX)
-
-run: build
-	./$(BINARY_NAME)
-
-build-linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -o $(BINARY_UNIX) -v
-
-dockerize:
-	docker build -t $(DOCKER_ACC)/$(DOCKER_REPO):$(TAG) .
-	docker push $(DOCKER_ACC)/$(DOCKER_REPO):$(TAG)
+	$(GO) clean
+	rm -f test-results.xml coverage.out

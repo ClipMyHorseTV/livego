@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReader(t *testing.T) {
@@ -14,17 +15,17 @@ func TestReader(t *testing.T) {
 	r := NewReadWriter(buf, 1024)
 	b := make([]byte, 3)
 	n, err := r.Read(b)
-	at.Equal(err, nil)
-	at.Equal(r.ReadError(), nil)
-	at.Equal(n, 3)
-	n, err = r.Read(b)
+	at.NoError(err)
+	at.NoError(r.ReadError())
+	at.Equal(3, n)
+	_, err = r.Read(b)
 	at.Equal(err, io.EOF)
 	at.Equal(r.ReadError(), io.EOF)
 	buf.WriteString("123")
 	n, err = r.Read(b)
 	at.Equal(err, io.EOF)
 	at.Equal(r.ReadError(), io.EOF)
-	at.Equal(n, 0)
+	at.Equal(0, n)
 }
 
 func TestReaderUintBE(t *testing.T) {
@@ -44,7 +45,7 @@ func TestReaderUintBE(t *testing.T) {
 		buf := bytes.NewBuffer(test.bytes)
 		r := NewReadWriter(buf, 1024)
 		n, err := r.ReadUintBE(test.i)
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		at.Equal(n, test.value, "test %d", test.i)
 	}
 }
@@ -66,7 +67,7 @@ func TestReaderUintLE(t *testing.T) {
 		buf := bytes.NewBuffer(test.bytes)
 		r := NewReadWriter(buf, 1024)
 		n, err := r.ReadUintLE(test.i)
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		at.Equal(n, test.value, "test %d", test.i)
 	}
 }
@@ -77,14 +78,14 @@ func TestWriter(t *testing.T) {
 	w := NewReadWriter(buf, 1024)
 	b := []byte{1, 2, 3}
 	n, err := w.Write(b)
-	at.Equal(err, nil)
-	at.Equal(w.WriteError(), nil)
-	at.Equal(n, 3)
+	at.NoError(err)
+	at.NoError(w.WriteError())
+	at.Equal(3, n)
 	w.writeError = io.EOF
 	n, err = w.Write(b)
 	at.Equal(err, io.EOF)
 	at.Equal(w.WriteError(), io.EOF)
-	at.Equal(n, 0)
+	at.Equal(0, n)
 }
 
 func TestWriteUintBE(t *testing.T) {
@@ -104,9 +105,9 @@ func TestWriteUintBE(t *testing.T) {
 		buf := bytes.NewBuffer(nil)
 		r := NewReadWriter(buf, 1024)
 		err := r.WriteUintBE(test.value, test.i)
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		err = r.Flush()
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		at.Equal(buf.Bytes(), test.bytes, "test %d", test.i)
 	}
 }
@@ -128,9 +129,9 @@ func TestWriteUintLE(t *testing.T) {
 		buf := bytes.NewBuffer(nil)
 		r := NewReadWriter(buf, 1024)
 		err := r.WriteUintLE(test.value, test.i)
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		err = r.Flush()
-		at.Equal(err, nil, "test %d", test.i)
+		require.NoError(t, err, "test %d", test.i)
 		at.Equal(buf.Bytes(), test.bytes, "test %d", test.i)
 	}
 }

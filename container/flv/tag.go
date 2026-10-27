@@ -115,12 +115,12 @@ func (tag *Tag) AACPacketType() uint8 {
 }
 
 func (tag *Tag) IsKeyFrame() bool {
-	return tag.mediat.frameType == av.FRAME_KEY
+	return tag.mediat.frameType == av.FrameKey
 }
 
 func (tag *Tag) IsSeq() bool {
-	return tag.mediat.frameType == av.FRAME_KEY &&
-		tag.mediat.avcPacketType == av.AVC_SEQHDR
+	return tag.mediat.frameType == av.FrameKey &&
+		tag.mediat.avcPacketType == av.AVCSeqHdr
 }
 
 func (tag *Tag) CodecID() uint8 {
@@ -131,7 +131,7 @@ func (tag *Tag) CompositionTime() int32 {
 	return tag.mediat.compositionTime
 }
 
-// ParseMediaTagHeader, parse video, audio, tag header
+// ParseMediaTagHeader parses the video or audio tag header.
 func (tag *Tag) ParseMediaTagHeader(b []byte, isVideo bool) (n int, err error) {
 	switch isVideo {
 	case false:
@@ -139,13 +139,13 @@ func (tag *Tag) ParseMediaTagHeader(b []byte, isVideo bool) (n int, err error) {
 	case true:
 		n, err = tag.parseVideoHeader(b)
 	}
-	return
+	return n, err
 }
 
 func (tag *Tag) parseAudioHeader(b []byte) (n int, err error) {
 	if len(b) < n+1 {
 		err = fmt.Errorf("invalid audiodata len=%d", len(b))
-		return
+		return n, err
 	}
 	flags := b[0]
 	tag.mediat.soundFormat = flags >> 4
@@ -153,33 +153,32 @@ func (tag *Tag) parseAudioHeader(b []byte) (n int, err error) {
 	tag.mediat.soundSize = (flags >> 1) & 0x1
 	tag.mediat.soundType = flags & 0x1
 	n++
-	switch tag.mediat.soundFormat {
-	case av.SOUND_AAC:
+	if tag.mediat.soundFormat == av.SoundAAC {
 		if len(b) < n+1 {
 			err = fmt.Errorf("invalid aac audiodata len=%d", len(b))
-			return
+			return n, err
 		}
 		tag.mediat.aacPacketType = b[1]
 		n++
 	}
-	return
+	return n, err
 }
 
 func (tag *Tag) parseVideoHeader(b []byte) (n int, err error) {
 	if len(b) < n+5 {
 		err = fmt.Errorf("invalid videodata len=%d", len(b))
-		return
+		return n, err
 	}
 	flags := b[0]
 	tag.mediat.frameType = flags >> 4
 	tag.mediat.codecID = flags & 0xf
 	n++
-	if tag.mediat.frameType == av.FRAME_INTER || tag.mediat.frameType == av.FRAME_KEY {
+	if tag.mediat.frameType == av.FrameInter || tag.mediat.frameType == av.FrameKey {
 		tag.mediat.avcPacketType = b[1]
 		for i := 2; i < 5; i++ {
 			tag.mediat.compositionTime = tag.mediat.compositionTime<<8 + int32(b[i])
 		}
 		n += 4
 	}
-	return
+	return n, err
 }

@@ -5,17 +5,15 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
-
 	"time"
 
 	"github.com/ClipMyHorseTV/livego/utils/pio"
 )
 
-var (
-	timeout = 5 * time.Second
-)
+var timeout = 5 * time.Second
 
 var (
 	hsClientFullKey = []byte{
@@ -51,17 +49,17 @@ func hsMakeDigest(key []byte, src []byte, gap int) (dst []byte) {
 }
 
 func hsCalcDigestPos(p []byte, base int) (pos int) {
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		pos += int(p[base+i])
 	}
 	pos = (pos % 728) + base + 4
-	return
+	return pos
 }
 
 func hsFindDigest(p []byte, key []byte, base int) int {
 	gap := hsCalcDigestPos(p, base)
 	digest := hsMakeDigest(key, p, gap)
-	if bytes.Compare(p[gap:gap+32], digest) != 0 {
+	if !bytes.Equal(p[gap:gap+32], digest) {
 		return -1
 	}
 	return gap
@@ -71,12 +69,12 @@ func hsParse1(p []byte, peerkey []byte, key []byte) (ok bool, digest []byte) {
 	var pos int
 	if pos = hsFindDigest(p, peerkey, 772); pos == -1 {
 		if pos = hsFindDigest(p, peerkey, 8); pos == -1 {
-			return
+			return ok, digest
 		}
 	}
 	ok = true
 	digest = hsMakeDigest(key, p[pos:pos+32], -1)
-	return
+	return ok, digest
 }
 
 func hsCreate01(p []byte, time uint32, ver uint32, key []byte) {
@@ -97,111 +95,122 @@ func hsCreate2(p []byte, key []byte) {
 	copy(p[gap:], digest)
 }
 
-func (conn *Conn) HandshakeClient() (err error) {
+// extendDeadline moves the connection deadline timeout into the future.
+func (conn *Conn) extendDeadline() error {
+	return conn.Conn.SetDeadline(time.Now().Add(timeout))
+}
+
+func (conn *Conn) HandshakeClient() error {
 	var random [(1 + 1536*2) * 2]byte
 
-	C0C1C2 := random[:1536*2+1]
-	C0 := C0C1C2[:1]
-	C0C1 := C0C1C2[:1536+1]
-	C2 := C0C1C2[1536+1:]
+	c0c1c2 := random[:1536*2+1]
+	c0 := c0c1c2[:1]
+	c0c1 := c0c1c2[:1536+1]
 
-	S0S1S2 := random[1536*2+1:]
+	s0s1s2 := random[1536*2+1:]
 
-	C0[0] = 3
+	c0[0] = 3
 	// > C0C1
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.rw.Write(C0C1); err != nil {
-		return
+	if err := conn.extendDeadline(); err != nil {
+		return err
 	}
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if err = conn.rw.Flush(); err != nil {
-		return
+	if _, err := conn.rw.Write(c0c1); err != nil {
+		return err
+	}
+	if err := conn.extendDeadline(); err != nil {
+		return err
+	}
+	if err := conn.rw.Flush(); err != nil {
+		return err
 	}
 
 	// < S0S1S2
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = io.ReadFull(conn.rw, S0S1S2); err != nil {
-		return
+	if err := conn.extendDeadline(); err != nil {
+		return err
+	}
+	if _, err := io.ReadFull(conn.rw, s0s1s2); err != nil {
+		return err
 	}
 
-	S1 := S0S1S2[1 : 1536+1]
-	if ver := pio.U32BE(S1[4:8]); ver != 0 {
-		C2 = S1
-	} else {
-		C2 = S1
+	// > C2, which echoes S1
+	c2 := s0s1s2[1 : 1536+1]
+	if err := conn.extendDeadline(); err != nil {
+		return err
 	}
-
-	// > C2
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.rw.Write(C2); err != nil {
-		return
+	if _, err := conn.rw.Write(c2); err != nil {
+		return err
 	}
-	conn.Conn.SetDeadline(time.Time{})
-	return
+	return conn.Conn.SetDeadline(time.Time{})
 }
 
-func (conn *Conn) HandshakeServer() (err error) {
+func (conn *Conn) HandshakeServer() error {
 	var random [(1 + 1536*2) * 2]byte
 
-	C0C1C2 := random[:1536*2+1]
-	C0 := C0C1C2[:1]
-	C1 := C0C1C2[1 : 1536+1]
-	C0C1 := C0C1C2[:1536+1]
-	C2 := C0C1C2[1536+1:]
+	c0c1c2 := random[:1536*2+1]
+	c0 := c0c1c2[:1]
+	c1 := c0c1c2[1 : 1536+1]
+	c0c1 := c0c1c2[:1536+1]
+	c2 := c0c1c2[1536+1:]
 
-	S0S1S2 := random[1536*2+1:]
-	S0 := S0S1S2[:1]
-	S1 := S0S1S2[1 : 1536+1]
-	S0S1 := S0S1S2[:1536+1]
-	S2 := S0S1S2[1536+1:]
+	s0s1s2 := random[1536*2+1:]
+	s0 := s0s1s2[:1]
+	s1 := s0s1s2[1 : 1536+1]
+	s0s1 := s0s1s2[:1536+1]
+	s2 := s0s1s2[1536+1:]
 
 	// < C0C1
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = io.ReadFull(conn.rw, C0C1); err != nil {
-		return
+	if err := conn.extendDeadline(); err != nil {
+		return err
 	}
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if C0[0] != 3 {
-		err = fmt.Errorf("rtmp: handshake version=%d invalid", C0[0])
-		return
+	if _, err := io.ReadFull(conn.rw, c0c1); err != nil {
+		return err
+	}
+	if err := conn.extendDeadline(); err != nil {
+		return err
+	}
+	if c0[0] != 3 {
+		return fmt.Errorf("rtmp: handshake version=%d invalid", c0[0])
 	}
 
-	S0[0] = 3
+	s0[0] = 3
 
-	clitime := pio.U32BE(C1[0:4])
+	clitime := pio.U32BE(c1[0:4])
 	srvtime := clitime
 	srvver := uint32(0x0d0e0a0d)
-	cliver := pio.U32BE(C1[4:8])
+	cliver := pio.U32BE(c1[4:8])
 
 	if cliver != 0 {
-		var ok bool
-		var digest []byte
-		if ok, digest = hsParse1(C1, hsClientPartialKey, hsServerFullKey); !ok {
-			err = fmt.Errorf("rtmp: handshake server: C1 invalid")
-			return
+		ok, digest := hsParse1(c1, hsClientPartialKey, hsServerFullKey)
+		if !ok {
+			return errors.New("rtmp: handshake server: C1 invalid")
 		}
-		hsCreate01(S0S1, srvtime, srvver, hsServerPartialKey)
-		hsCreate2(S2, digest)
+		hsCreate01(s0s1, srvtime, srvver, hsServerPartialKey)
+		hsCreate2(s2, digest)
 	} else {
-		copy(S1, C2)
-		copy(S2, C1)
+		copy(s1, c2)
+		copy(s2, c1)
 	}
 
 	// > S0S1S2
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = conn.rw.Write(S0S1S2); err != nil {
-		return
+	if err := conn.extendDeadline(); err != nil {
+		return err
 	}
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if err = conn.rw.Flush(); err != nil {
-		return
+	if _, err := conn.rw.Write(s0s1s2); err != nil {
+		return err
+	}
+	if err := conn.extendDeadline(); err != nil {
+		return err
+	}
+	if err := conn.rw.Flush(); err != nil {
+		return err
 	}
 
 	// < C2
-	conn.Conn.SetDeadline(time.Now().Add(timeout))
-	if _, err = io.ReadFull(conn.rw, C2); err != nil {
-		return
+	if err := conn.extendDeadline(); err != nil {
+		return err
 	}
-	conn.Conn.SetDeadline(time.Time{})
-	return
+	if _, err := io.ReadFull(conn.rw, c2); err != nil {
+		return err
+	}
+	return conn.Conn.SetDeadline(time.Time{})
 }

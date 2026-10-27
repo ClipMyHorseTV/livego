@@ -2,7 +2,7 @@ package core
 
 import (
 	"bytes"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -17,9 +17,7 @@ var (
 	publishAppend = "append"
 )
 
-var (
-	ErrReq = fmt.Errorf("req error")
-)
+var ErrReq = errors.New("req error")
 
 var (
 	cmdConnect       = "connect"
@@ -32,16 +30,18 @@ var (
 	cmdPlay          = "play"
 )
 
+const levelStatus = "status"
+
 type ConnectInfo struct {
-	App            string `amf:"app" json:"app"`
-	Flashver       string `amf:"flashVer" json:"flashVer"`
-	SwfUrl         string `amf:"swfUrl" json:"swfUrl"`
-	TcUrl          string `amf:"tcUrl" json:"tcUrl"`
-	Fpad           bool   `amf:"fpad" json:"fpad"`
-	AudioCodecs    int    `amf:"audioCodecs" json:"audioCodecs"`
-	VideoCodecs    int    `amf:"videoCodecs" json:"videoCodecs"`
-	VideoFunction  int    `amf:"videoFunction" json:"videoFunction"`
-	PageUrl        string `amf:"pageUrl" json:"pageUrl"`
+	App            string `amf:"app"            json:"app"`
+	Flashver       string `amf:"flashVer"       json:"flashVer"`
+	SwfURL         string `amf:"swfUrl"         json:"swfUrl"`
+	TcURL          string `amf:"tcUrl"          json:"tcUrl"`
+	Fpad           bool   `amf:"fpad"           json:"fpad"`
+	AudioCodecs    int    `amf:"audioCodecs"    json:"audioCodecs"`
+	VideoCodecs    int    `amf:"videoCodecs"    json:"videoCodecs"`
+	VideoFunction  int    `amf:"videoFunction"  json:"videoFunction"`
+	PageURL        string `amf:"pageUrl"        json:"pageUrl"`
 	ObjectEncoding int    `amf:"objectEncoding" json:"objectEncoding"`
 }
 
@@ -85,7 +85,7 @@ func NewConnServer(conn *Conn) *ConnServer {
 	}
 }
 
-func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...interface{}) error {
+func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...any) error {
 	connServer.bytesw.Reset()
 	for _, v := range args {
 		if _, err := connServer.encoder.Encode(connServer.bytesw, v, amf.AMF0); err != nil {
@@ -93,82 +93,89 @@ func (connServer *ConnServer) writeMsg(csid, streamID uint32, args ...interface{
 		}
 	}
 	msg := connServer.bytesw.Bytes()
+	length, err := MessageLength(len(msg))
+	if err != nil {
+		return err
+	}
 	c := ChunkStream{
 		Format:    0,
 		CSID:      csid,
 		Timestamp: 0,
 		TypeID:    20,
 		StreamID:  streamID,
-		Length:    uint32(len(msg)),
+		Length:    length,
 		Data:      msg,
 	}
-	connServer.conn.Write(&c)
+	if err := connServer.conn.Write(&c); err != nil {
+		return err
+	}
 	return connServer.conn.Flush()
 }
 
-func (connServer *ConnServer) connect(vs []interface{}) error {
+func (connServer *ConnServer) connect(vs []any) error {
 	for _, v := range vs {
-		switch v.(type) {
-		case string:
+		switch v := v.(type) {
 		case float64:
-			id := int(v.(float64))
+			id := int(v)
 			if id != 1 {
 				return ErrReq
 			}
 			connServer.transactionID = id
 		case amf.Object:
-			obimap := v.(amf.Object)
-			if app, ok := obimap["app"]; ok {
-				connServer.ConnInfo.App = app.(string)
+			if app, ok := v["app"].(string); ok {
+				connServer.ConnInfo.App = app
 			}
-			if flashVer, ok := obimap["flashVer"]; ok {
-				connServer.ConnInfo.Flashver = flashVer.(string)
+			if flashVer, ok := v["flashVer"].(string); ok {
+				connServer.ConnInfo.Flashver = flashVer
 			}
-			if tcurl, ok := obimap["tcUrl"]; ok {
-				connServer.ConnInfo.TcUrl = tcurl.(string)
+			if tcurl, ok := v["tcUrl"].(string); ok {
+				connServer.ConnInfo.TcURL = tcurl
 			}
-			if encoding, ok := obimap["objectEncoding"]; ok {
-				connServer.ConnInfo.ObjectEncoding = int(encoding.(float64))
+			if encoding, ok := v["objectEncoding"].(float64); ok {
+				connServer.ConnInfo.ObjectEncoding = int(encoding)
 			}
 		}
 	}
 	return nil
 }
 
-func (connServer *ConnServer) releaseStream(vs []interface{}) error {
+func (connServer *ConnServer) releaseStream(vs []any) error {
 	return nil
 }
 
-func (connServer *ConnServer) fcPublish(vs []interface{}) error {
+func (connServer *ConnServer) fcPublish(vs []any) error {
 	return nil
 }
 
 func (connServer *ConnServer) connectResp(cur *ChunkStream) error {
-	c := connServer.conn.NewWindowAckSize(2500000)
-	connServer.conn.Write(&c)
-	c = connServer.conn.NewSetPeerBandwidth(2500000)
-	connServer.conn.Write(&c)
-	c = connServer.conn.NewSetChunkSize(uint32(1024))
-	connServer.conn.Write(&c)
+	for _, c := range []ChunkStream{
+		connServer.conn.NewWindowAckSize(2500000),
+		connServer.conn.NewSetPeerBandwidth(2500000),
+		connServer.conn.NewSetChunkSize(uint32(1024)),
+	} {
+		if err := connServer.conn.Write(&c); err != nil {
+			return err
+		}
+	}
 
 	resp := make(amf.Object)
 	resp["fmsVer"] = "FMS/3,0,1,123"
 	resp["capabilities"] = 31
 
 	event := make(amf.Object)
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetConnection.Connect.Success"
 	event["description"] = "Connection succeeded."
 	event["objectEncoding"] = connServer.ConnInfo.ObjectEncoding
 	return connServer.writeMsg(cur.CSID, cur.StreamID, "_result", connServer.transactionID, resp, event)
 }
 
-func (connServer *ConnServer) createStream(vs []interface{}) error {
+func (connServer *ConnServer) createStream(vs []any) error {
 	for _, v := range vs {
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
 		case float64:
-			connServer.transactionID = int(v.(float64))
+			connServer.transactionID = int(v)
 		case amf.Object:
 		}
 	}
@@ -179,17 +186,18 @@ func (connServer *ConnServer) createStreamResp(cur *ChunkStream) error {
 	return connServer.writeMsg(cur.CSID, cur.StreamID, "_result", connServer.transactionID, nil, connServer.streamID)
 }
 
-func (connServer *ConnServer) publishOrPlay(vs []interface{}) error {
+func (connServer *ConnServer) publishOrPlay(vs []any) error {
 	for k, v := range vs {
-		switch v.(type) {
+		switch v := v.(type) {
 		case string:
-			if k == 2 {
-				connServer.PublishInfo.Name = v.(string)
-			} else if k == 3 {
-				connServer.PublishInfo.Type = v.(string)
+			switch k {
+			case 2:
+				connServer.PublishInfo.Name = v
+			case 3:
+				connServer.PublishInfo.Type = v
 			}
 		case float64:
-			id := int(v.(float64))
+			id := int(v)
 			connServer.transactionID = id
 		case amf.Object:
 		}
@@ -200,39 +208,43 @@ func (connServer *ConnServer) publishOrPlay(vs []interface{}) error {
 
 func (connServer *ConnServer) publishResp(cur *ChunkStream) error {
 	event := make(amf.Object)
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetStream.Publish.Start"
 	event["description"] = "Start publishing."
 	return connServer.writeMsg(cur.CSID, cur.StreamID, "onStatus", 0, nil, event)
 }
 
 func (connServer *ConnServer) playResp(cur *ChunkStream) error {
-	connServer.conn.SetRecorded()
-	connServer.conn.SetBegin()
+	if err := connServer.conn.SetRecorded(); err != nil {
+		return err
+	}
+	if err := connServer.conn.SetBegin(); err != nil {
+		return err
+	}
 
 	event := make(amf.Object)
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetStream.Play.Reset"
 	event["description"] = "Playing and resetting stream."
 	if err := connServer.writeMsg(cur.CSID, cur.StreamID, "onStatus", 0, nil, event); err != nil {
 		return err
 	}
 
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetStream.Play.Start"
 	event["description"] = "Started playing stream."
 	if err := connServer.writeMsg(cur.CSID, cur.StreamID, "onStatus", 0, nil, event); err != nil {
 		return err
 	}
 
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetStream.Data.Start"
 	event["description"] = "Started playing stream."
 	if err := connServer.writeMsg(cur.CSID, cur.StreamID, "onStatus", 0, nil, event); err != nil {
 		return err
 	}
 
-	event["level"] = "status"
+	event["level"] = levelStatus
 	event["code"] = "NetStream.Play.PublishNotify"
 	event["description"] = "Started playing notify."
 	if err := connServer.writeMsg(cur.CSID, cur.StreamID, "onStatus", 0, nil, event); err != nil {
@@ -242,62 +254,66 @@ func (connServer *ConnServer) playResp(cur *ChunkStream) error {
 }
 
 func (connServer *ConnServer) handleCmdMsg(c *ChunkStream) error {
-	amfType := amf.AMF0
 	if c.TypeID == 17 {
 		c.Data = c.Data[1:]
 	}
 	r := bytes.NewReader(c.Data)
-	vs, err := connServer.decoder.DecodeBatch(r, amf.Version(amfType))
-	if err != nil && err != io.EOF {
+	// DecodeBatch decodes until it fails, so io.EOF marks a completely decoded message.
+	vs, err := connServer.decoder.DecodeBatch(r, amf.AMF0)
+	if !errors.Is(err, io.EOF) {
 		return err
 	}
 	// log.Debugf("rtmp req: %#v", vs)
-	switch vs[0].(type) {
-	case string:
-		switch vs[0].(string) {
-		case cmdConnect:
-			if err = connServer.connect(vs[1:]); err != nil {
-				return err
-			}
-			if err = connServer.connectResp(c); err != nil {
-				return err
-			}
-		case cmdCreateStream:
-			if err = connServer.createStream(vs[1:]); err != nil {
-				return err
-			}
-			if err = connServer.createStreamResp(c); err != nil {
-				return err
-			}
-		case cmdPublish:
-			if err = connServer.publishOrPlay(vs[1:]); err != nil {
-				return err
-			}
-			if err = connServer.publishResp(c); err != nil {
-				return err
-			}
-			connServer.done = true
-			connServer.isPublisher = true
-			log.Debug("handle publish req done")
-		case cmdPlay:
-			if err = connServer.publishOrPlay(vs[1:]); err != nil {
-				return err
-			}
-			if err = connServer.playResp(c); err != nil {
-				return err
-			}
-			connServer.done = true
-			connServer.isPublisher = false
-			log.Debug("handle play req done")
-		case cmdFcpublish:
-			connServer.fcPublish(vs)
-		case cmdReleaseStream:
-			connServer.releaseStream(vs)
-		case cmdFCUnpublish:
-		case cmdDeleteStream:
-		default:
-			log.Debug("no support command=", vs[0].(string))
+	if len(vs) == 0 {
+		return nil
+	}
+	cmd, ok := vs[0].(string)
+	if !ok {
+		return nil
+	}
+	return connServer.handleCmd(cmd, vs, c)
+}
+
+// handleCmd answers the command message cmd whose decoded values (including cmd itself) are vs.
+func (connServer *ConnServer) handleCmd(cmd string, vs []any, c *ChunkStream) error {
+	switch cmd {
+	case cmdConnect:
+		if err := connServer.connect(vs[1:]); err != nil {
+			return err
 		}
+		return connServer.connectResp(c)
+	case cmdCreateStream:
+		if err := connServer.createStream(vs[1:]); err != nil {
+			return err
+		}
+		return connServer.createStreamResp(c)
+	case cmdPublish:
+		if err := connServer.publishOrPlay(vs[1:]); err != nil {
+			return err
+		}
+		if err := connServer.publishResp(c); err != nil {
+			return err
+		}
+		connServer.done = true
+		connServer.isPublisher = true
+		log.Debug("handle publish req done")
+	case cmdPlay:
+		if err := connServer.publishOrPlay(vs[1:]); err != nil {
+			return err
+		}
+		if err := connServer.playResp(c); err != nil {
+			return err
+		}
+		connServer.done = true
+		connServer.isPublisher = false
+		log.Debug("handle play req done")
+	case cmdFcpublish:
+		return connServer.fcPublish(vs)
+	case cmdReleaseStream:
+		return connServer.releaseStream(vs)
+	case cmdFCUnpublish, cmdDeleteStream:
+	default:
+		log.Debug("no support command=", cmd)
 	}
 
 	return nil
@@ -327,13 +343,15 @@ func (connServer *ConnServer) IsPublisher() bool {
 }
 
 func (connServer *ConnServer) Write(c ChunkStream) error {
-	if c.TypeID == av.TAG_SCRIPTDATAAMF0 ||
-		c.TypeID == av.TAG_SCRIPTDATAAMF3 {
+	if c.TypeID == av.TagScriptDataAMF0 ||
+		c.TypeID == av.TagScriptDataAMF3 {
 		var err error
 		if c.Data, err = amf.MetaDataReform(c.Data, amf.DEL); err != nil {
 			return err
 		}
-		c.Length = uint32(len(c.Data))
+		if c.Length, err = MessageLength(len(c.Data)); err != nil {
+			return err
+		}
 	}
 	return connServer.conn.Write(&c)
 }
@@ -349,10 +367,12 @@ func (connServer *ConnServer) Read(c *ChunkStream) (err error) {
 func (connServer *ConnServer) GetInfo() (app string, name string, url string) {
 	app = connServer.ConnInfo.App
 	name = connServer.PublishInfo.Name
-	url = connServer.ConnInfo.TcUrl + "/" + connServer.PublishInfo.Name
-	return
+	url = connServer.ConnInfo.TcURL + "/" + connServer.PublishInfo.Name
+	return app, name, url
 }
 
-func (connServer *ConnServer) Close(err error) {
-	connServer.conn.Close()
+func (connServer *ConnServer) Close(error) {
+	if err := connServer.conn.Close(); err != nil {
+		log.Debug("rtmp server conn close: ", err)
+	}
 }

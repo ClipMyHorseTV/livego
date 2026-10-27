@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
 	"github.com/ClipMyHorseTV/livego/configure"
@@ -18,15 +19,25 @@ import (
 
 type Response struct {
 	w      http.ResponseWriter
-	Status int         `json:"status"`
-	Data   interface{} `json:"data"`
+	Status int `json:"status"`
+	Data   any `json:"data"`
 }
 
-func (r *Response) SendJson() (int, error) {
-	resp, _ := json.Marshal(r)
+func (r *Response) SendJSON() (int, error) {
+	resp, err := json.Marshal(r)
+	if err != nil {
+		return 0, err
+	}
 	r.w.Header().Set("Content-Type", "application/json")
 	r.w.WriteHeader(r.Status)
 	return r.w.Write(resp)
+}
+
+// send writes the response and logs a failed write. It is meant to be deferred by handlers.
+func (r *Response) send() {
+	if _, err := r.SendJSON(); err != nil {
+		log.Warning("api: write response: ", err)
+	}
 }
 
 type Operation struct {
@@ -82,7 +93,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 
 		jwtMiddleware := jwtmiddleware.New(jwtmiddleware.Options{
 			Extractor: jwtmiddleware.FromFirst(jwtmiddleware.FromAuthHeader, jwtmiddleware.FromParameter("jwt")),
-			ValidationKeyGetter: func(token *jwt.Token) (interface{}, error) {
+			ValidationKeyGetter: func(token *jwt.Token) (any, error) {
 				return []byte(configure.Config.GetString("jwt.secret")), nil
 			},
 			SigningMethod: algorithm,
@@ -92,7 +103,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 					Status: 403,
 					Data:   err,
 				}
-				res.SendJson()
+				res.send()
 			},
 		})
 
@@ -123,14 +134,17 @@ func (s *Server) Serve(l net.Listener) error {
 	mux.HandleFunc("/stat/livestat", func(w http.ResponseWriter, r *http.Request) {
 		s.GetLiveStatics(w, r)
 	})
-	http.Serve(l, JWTMiddleware(mux))
-	return nil
+	srv := &http.Server{
+		Handler:           JWTMiddleware(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return srv.Serve(l)
 }
 
 type stream struct {
 	Key             string `json:"key"`
-	Url             string `json:"url"`
-	StreamId        uint32 `json:"stream_id"`
+	URL             string `json:"url"`
+	StreamID        uint32 `json:"stream_id"`
 	VideoTotalBytes uint64 `json:"video_total_bytes"`
 	VideoSpeed      uint64 `json:"video_speed"`
 	AudioTotalBytes uint64 `json:"audio_total_bytes"`
@@ -142,7 +156,7 @@ type streams struct {
 	Players    []stream `json:"players"`
 }
 
-// http://127.0.0.1:8090/stat/livestat
+// GetLiveStatics serves the live statistics, e.g. http://127.0.0.1:8090/stat/livestat.
 func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 	res := &Response{
 		w:      w,
@@ -150,7 +164,7 @@ func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 		Status: 200,
 	}
 
-	defer res.SendJson()
+	defer res.send()
 
 	room := ""
 
@@ -158,88 +172,67 @@ func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 		room = req.Form.Get("room")
 	}
 
-	rtmpStream := server.handler.(*rtmp.RtmpStream)
-	if rtmpStream == nil {
+	rtmpStream, ok := server.handler.(*rtmp.RtmpStream)
+	if !ok || rtmpStream == nil {
 		res.Status = 500
 		res.Data = "Get rtmp stream information error"
 		return
 	}
 
 	msgs := new(streams)
+	res.Data = msgs
 
-	if room == "" {
-		rtmpStream.GetStreams().Range(func(key, val interface{}) bool {
-			if s, ok := val.(*rtmp.Stream); ok {
-				if s.GetReader() != nil {
-					switch s.GetReader().(type) {
-					case *rtmp.VirReader:
-						v := s.GetReader().(*rtmp.VirReader)
-						msg := stream{key.(string), v.Info().URL, v.ReadBWInfo.StreamId, v.ReadBWInfo.VideoDatainBytes, v.ReadBWInfo.VideoSpeedInBytesperMS,
-							v.ReadBWInfo.AudioDatainBytes, v.ReadBWInfo.AudioSpeedInBytesperMS}
-						msgs.Publishers = append(msgs.Publishers, msg)
-					}
-				}
-			}
-			return true
-		})
-
-		rtmpStream.GetStreams().Range(func(key, val interface{}) bool {
-			ws := val.(*rtmp.Stream).GetWs()
-			ws.Range(func(k, v interface{}) bool {
-				if pw, ok := v.(*rtmp.PackWriterCloser); ok {
-					if pw.GetWriter() != nil {
-						switch pw.GetWriter().(type) {
-						case *rtmp.VirWriter:
-							v := pw.GetWriter().(*rtmp.VirWriter)
-							msg := stream{key.(string), v.Info().URL, v.WriteBWInfo.StreamId, v.WriteBWInfo.VideoDatainBytes, v.WriteBWInfo.VideoSpeedInBytesperMS,
-								v.WriteBWInfo.AudioDatainBytes, v.WriteBWInfo.AudioSpeedInBytesperMS}
-							msgs.Players = append(msgs.Players, msg)
-						}
-					}
-				}
-				return true
-			})
-			return true
-		})
-	} else {
+	if room != "" {
 		// Warning: The room should be in the "live/stream" format!
-		roomInfo, exists := (rtmpStream.GetStreams()).Load(room)
-		if exists == false {
+		roomInfo, exists := rtmpStream.GetStreams().Load(room)
+		if !exists {
 			res.Status = 404
 			res.Data = "room not found or inactive"
 			return
 		}
 
 		if s, ok := roomInfo.(*rtmp.Stream); ok {
-			if s.GetReader() != nil {
-				switch s.GetReader().(type) {
-				case *rtmp.VirReader:
-					v := s.GetReader().(*rtmp.VirReader)
-					msg := stream{room, v.Info().URL, v.ReadBWInfo.StreamId, v.ReadBWInfo.VideoDatainBytes, v.ReadBWInfo.VideoSpeedInBytesperMS,
-						v.ReadBWInfo.AudioDatainBytes, v.ReadBWInfo.AudioSpeedInBytesperMS}
-					msgs.Publishers = append(msgs.Publishers, msg)
-				}
-			}
-
-			s.GetWs().Range(func(k, v interface{}) bool {
-				if pw, ok := v.(*rtmp.PackWriterCloser); ok {
-					if pw.GetWriter() != nil {
-						switch pw.GetWriter().(type) {
-						case *rtmp.VirWriter:
-							v := pw.GetWriter().(*rtmp.VirWriter)
-							msg := stream{room, v.Info().URL, v.WriteBWInfo.StreamId, v.WriteBWInfo.VideoDatainBytes, v.WriteBWInfo.VideoSpeedInBytesperMS,
-								v.WriteBWInfo.AudioDatainBytes, v.WriteBWInfo.AudioSpeedInBytesperMS}
-							msgs.Players = append(msgs.Players, msg)
-						}
-					}
-				}
-				return true
-			})
+			msgs.add(room, s)
 		}
+		return
 	}
 
-	//resp, _ := json.Marshal(msgs)
-	res.Data = msgs
+	rtmpStream.GetStreams().Range(func(key, val any) bool {
+		k, ok := key.(string)
+		if !ok {
+			return true
+		}
+		if s, ok := val.(*rtmp.Stream); ok {
+			msgs.add(k, s)
+		}
+		return true
+	})
+}
+
+// add appends the publisher and the players of the stream s to msgs.
+func (msgs *streams) add(key string, s *rtmp.Stream) {
+	if v, ok := s.GetReader().(*rtmp.VirReader); ok {
+		msg := stream{
+			key, v.Info().URL, v.ReadBWInfo.StreamID, v.ReadBWInfo.VideoDatainBytes, v.ReadBWInfo.VideoSpeedInBytesperMS,
+			v.ReadBWInfo.AudioDatainBytes, v.ReadBWInfo.AudioSpeedInBytesperMS,
+		}
+		msgs.Publishers = append(msgs.Publishers, msg)
+	}
+
+	s.GetWs().Range(func(_, val any) bool {
+		pw, ok := val.(*rtmp.PackWriterCloser)
+		if !ok {
+			return true
+		}
+		if v, ok := pw.GetWriter().(*rtmp.VirWriter); ok {
+			msg := stream{
+				key, v.Info().URL, v.WriteBWInfo.StreamID, v.WriteBWInfo.VideoDatainBytes, v.WriteBWInfo.VideoSpeedInBytesperMS,
+				v.WriteBWInfo.AudioDatainBytes, v.WriteBWInfo.AudioSpeedInBytesperMS,
+			}
+			msgs.Players = append(msgs.Players, msg)
+		}
+		return true
+	})
 }
 
 // http://127.0.0.1:8090/control/pull?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456
@@ -253,7 +246,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 		Status: 200,
 	}
 
-	defer res.SendJson()
+	defer res.send()
 
 	if req.ParseForm() != nil {
 		res.Status = 400
@@ -267,7 +260,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 	url := req.Form.Get("url")
 
 	log.Debugf("control pull: oper=%v, app=%v, name=%v, url=%v", oper, app, name, url)
-	if (len(app) <= 0) || (len(name) <= 0) || (len(url) <= 0) {
+	if app == "" || name == "" || url == "" {
 		res.Status = 400
 		res.Data = "control push parameter error, please check them."
 		return
@@ -322,7 +315,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 		Status: 200,
 	}
 
-	defer res.SendJson()
+	defer res.send()
 
 	if req.ParseForm() != nil {
 		res.Data = "url: /control/push?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456"
@@ -335,7 +328,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 	url := req.Form.Get("url")
 
 	log.Debugf("control push: oper=%v, app=%v, name=%v, url=%v", oper, app, name, url)
-	if (len(app) <= 0) || (len(name) <= 0) || (len(url) <= 0) {
+	if app == "" || name == "" || url == "" {
 		res.Data = "control push parameter error, please check them."
 		return
 	}
@@ -381,7 +374,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		Data:   nil,
 		Status: 200,
 	}
-	defer res.SendJson()
+	defer res.send()
 
 	if err := r.ParseForm(); err != nil {
 		res.Status = 400
@@ -397,7 +390,6 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	msg, err := configure.RoomKeys.SetKey(room)
-
 	if err != nil {
 		msg = err.Error()
 		res.Status = 400
@@ -413,7 +405,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		Data:   nil,
 		Status: 200,
 	}
-	defer res.SendJson()
+	defer res.send()
 
 	if err := r.ParseForm(); err != nil {
 		res.Status = 400
@@ -444,7 +436,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		Data:   nil,
 		Status: 200,
 	}
-	defer res.SendJson()
+	defer res.send()
 
 	if err := r.ParseForm(); err != nil {
 		res.Status = 400

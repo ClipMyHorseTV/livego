@@ -1,7 +1,7 @@
 package parser
 
 import (
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ClipMyHorseTV/livego/av"
@@ -10,9 +10,7 @@ import (
 	"github.com/ClipMyHorseTV/livego/parser/mp3"
 )
 
-var (
-	errNoAudio = fmt.Errorf("demuxer no audio")
-)
+var errNoAudio = errors.New("demuxer no audio")
 
 type CodecParser struct {
 	aac  *aac.Parser
@@ -35,12 +33,11 @@ func (codeParser *CodecParser) SampleRate() (int, error) {
 }
 
 func (codeParser *CodecParser) Parse(p *av.Packet, w io.Writer) (err error) {
-
 	switch p.IsVideo {
 	case true:
 		f, ok := p.Header.(av.VideoPacketHeader)
 		if ok {
-			if f.CodecID() == av.VIDEO_H264 {
+			if f.CodecID() == av.VideoH264 {
 				if codeParser.h264 == nil {
 					codeParser.h264 = h264.NewParser()
 				}
@@ -51,19 +48,18 @@ func (codeParser *CodecParser) Parse(p *av.Packet, w io.Writer) (err error) {
 		f, ok := p.Header.(av.AudioPacketHeader)
 		if ok {
 			switch f.SoundFormat() {
-			case av.SOUND_AAC:
+			case av.SoundAAC:
 				if codeParser.aac == nil {
 					codeParser.aac = aac.NewParser()
 				}
 				err = codeParser.aac.Parse(p.Data, f.AACPacketType(), w)
-			case av.SOUND_MP3:
+			case av.SoundMP3:
 				if codeParser.mp3 == nil {
 					codeParser.mp3 = mp3.NewParser()
 				}
 				err = codeParser.mp3.Parse(p.Data)
 			}
 		}
-
 	}
-	return
+	return err
 }
