@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
   checks: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
   test:
@@ -34,8 +34,36 @@ jobs:
       - name: Coverage summary
         if: matrix.name == 'stable'
         run: |
-          echo '### Coverage' >> "$GITHUB_STEP_SUMMARY"
-          go tool cover -func=coverage.out | awk '/^total:/ {print "Total: **" $NF "**"}' >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo '### Coverage'
+            echo
+            go tool cover -func=coverage.out | awk '/^total:/ {print "Total: **" $NF "**"}'
+            echo
+            echo '<details><summary>Per package</summary>'
+            echo
+            echo '| Package | Coverage |'
+            echo '| --- | ---: |'
+            # coverage.out lines are "file:start,end statements count"; sum statements per package directory.
+            awk -v mod="$(go list -m)/" 'NR > 1 {
+              split($1, loc, ":"); file = loc[1]; sub("^" mod, "", file)
+              pkg = file; sub("/[^/]*$", "", pkg); if (pkg == file) pkg = "."
+              total[pkg] += $2; if ($3 > 0) covered[pkg] += $2
+            } END {
+              for (pkg in total) printf "| `%s` | %.1f%% |\n", pkg, total[pkg] ? 100 * covered[pkg] / total[pkg] : 0
+            }' coverage.out | sort
+            echo
+            echo '</details>'
+          } > coverage.md
+          cat coverage.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment coverage on PR
+        # The token is read-only for pull requests from forks, so commenting would fail there.
+        if: >-
+          matrix.name == 'stable' && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: coverage
+          path: coverage.md
       - name: Annotate coverage
         if: matrix.name == 'stable' && github.event_name == 'pull_request'
         uses: ggilder/codecoverage@v1
