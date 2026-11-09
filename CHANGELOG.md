@@ -46,6 +46,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `livego` binary (`main.go`).
 - Docker image, GoReleaser config and release workflow.
 
+## [0.0.24] 2026-11-06
+
+### Fixed
+
+- fixed a race condition in VirWriter close handling
+
+## [0.0.23]
+
+### Changed
+
+- made error log more verbose from `dec buf is nil` error to now return `avc decoder config record too short`
+
 ## [0.0.22]
 
 ### Fixed
