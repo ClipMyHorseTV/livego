@@ -244,8 +244,9 @@ func streamKey(streamURL string) string {
 }
 
 type VirWriter struct {
-	Uid string
 	av.RWBaser
+
+	Uid         string
 	conn        StreamReadWriteCloser
 	packetQueue chan *av.Packet
 	done        chan struct{}
@@ -319,43 +320,67 @@ func (v *VirWriter) send(pktQue chan *av.Packet, p *av.Packet) bool {
 	}
 }
 
+// DropPacket relieves a full packet queue by cycling packets through it and discarding the ones least important for playback.
 func (v *VirWriter) DropPacket(pktQue chan *av.Packet, info av.Info) {
 	log.Warningf("[%v] packet queue max!!!", info)
 	for range maxQueueNum - 84 {
-		tmpPkt, ok := v.recv(pktQue)
+		pkt, ok := v.recv(pktQue)
 		if !ok {
 			return
 		}
-
-		// try to don't drop audio
-		if tmpPkt.IsAudio {
-			if len(pktQue) > maxQueueNum-2 {
-				log.Debug("drop audio pkt")
-				if _, ok := v.recv(pktQue); !ok {
-					return
-				}
-			} else if !v.send(pktQue, tmpPkt) {
-				return
-			}
-		}
-
-		if tmpPkt.IsVideo {
-			videoPkt, ok := tmpPkt.Header.(av.VideoPacketHeader)
-			// dont't drop sps config and dont't drop key frame
-			if ok && (videoPkt.IsSeq() || videoPkt.IsKeyFrame()) {
-				if !v.send(pktQue, tmpPkt) {
-					return
-				}
-			}
-			if len(pktQue) > maxQueueNum-10 {
-				log.Debug("drop video pkt")
-				if _, ok := v.recv(pktQue); !ok {
-					return
-				}
-			}
+		if !v.requeueOrDrop(pktQue, pkt) {
+			return
 		}
 	}
 	log.Debug("packet queue len: ", len(pktQue))
+}
+
+// requeueOrDrop puts pkt back into the queue if it is worth keeping.
+// Packets that are neither audio nor video are dropped.
+// It returns false once the writer is closed.
+func (v *VirWriter) requeueOrDrop(pktQue chan *av.Packet, pkt *av.Packet) bool {
+	switch {
+	case pkt.IsAudio:
+		return v.requeueAudio(pktQue, pkt)
+	case pkt.IsVideo:
+		return v.requeueVideo(pktQue, pkt)
+	default:
+		return true
+	}
+}
+
+// requeueAudio tries not to drop audio: the packet is kept unless the queue is almost full.
+func (v *VirWriter) requeueAudio(pktQue chan *av.Packet, pkt *av.Packet) bool {
+	if len(pktQue) > maxQueueNum-2 {
+		log.Debug("drop audio pkt")
+		return v.discardNext(pktQue)
+	}
+	return v.send(pktQue, pkt)
+}
+
+// requeueVideo keeps sequence headers and key frames, drops everything else.
+func (v *VirWriter) requeueVideo(pktQue chan *av.Packet, pkt *av.Packet) bool {
+	if isEssentialVideo(pkt) && !v.send(pktQue, pkt) {
+		return false
+	}
+	if len(pktQue) > maxQueueNum-10 {
+		log.Debug("drop video pkt")
+		return v.discardNext(pktQue)
+	}
+	return true
+}
+
+// isEssentialVideo reports whether pkt is a sequence header (SPS/PPS) or a key frame.
+func isEssentialVideo(pkt *av.Packet) bool {
+	header, ok := pkt.Header.(av.VideoPacketHeader)
+	return ok && (header.IsSeq() || header.IsKeyFrame())
+}
+
+// discardNext removes and drops the next packet in the queue.
+// It returns false once the writer is closed.
+func (v *VirWriter) discardNext(pktQue chan *av.Packet) bool {
+	_, ok := v.recv(pktQue)
+	return ok
 }
 
 func (v *VirWriter) Write(p *av.Packet) error {
