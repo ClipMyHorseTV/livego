@@ -9,9 +9,9 @@ type align struct {
 	frameBase uint64
 }
 
-func (a *align) align(dts *uint64, inc uint32) {
+func (a *align) align(dts *uint64, inc uint64) {
 	aFrameDts := *dts
-	estPts := a.frameBase + a.frameNum*uint64(inc)
+	estPts := a.frameBase + a.frameNum*inc
 	var dPts uint64
 	if estPts >= aFrameDts {
 		dPts = estPts - aFrameDts
@@ -19,7 +19,7 @@ func (a *align) align(dts *uint64, inc uint32) {
 		dPts = aFrameDts - estPts
 	}
 
-	if dPts <= uint64(syncms)*h264_default_hz {
+	if dPts <= uint64(syncms)*h264DefaultHz {
 		a.frameNum++
 		*dts = estPts
 		return

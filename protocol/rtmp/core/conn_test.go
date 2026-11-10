@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConnReadNormal(t *testing.T) {
@@ -29,13 +30,13 @@ func TestConnReadNormal(t *testing.T) {
 	}
 	var c ChunkStream
 	err := conn.Read(&c)
-	at.Equal(err, nil)
-	at.Equal(int(c.CSID), 6)
-	at.Equal(int(c.Length), 307)
-	at.Equal(int(c.TypeID), 9)
+	require.NoError(t, err)
+	at.Equal(6, int(c.CSID))
+	at.Equal(307, int(c.Length))
+	at.Equal(9, int(c.TypeID))
 }
 
-// 交叉读音视频数据
+// 交叉读音视频数据.
 func TestConnCrossReading(t *testing.T) {
 	at := assert.New(t)
 	data1 := make([]byte, 128)
@@ -47,21 +48,21 @@ func TestConnCrossReading(t *testing.T) {
 	audioData := []byte{
 		0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x33, 0x08, 0x01, 0x00, 0x00, 0x00,
 	}
-	//video 1
+	// video 1
 	videoData = append(videoData, data1...)
-	//video 2
+	// video 2
 	videoData = append(videoData, 0xc6)
 	videoData = append(videoData, data1...)
-	//audio 1
+	// audio 1
 	videoData = append(videoData, audioData...)
 	videoData = append(videoData, data1...)
-	//audio 2
+	// audio 2
 	videoData = append(videoData, 0xc4)
 	videoData = append(videoData, data1...)
-	//video 3
+	// video 3
 	videoData = append(videoData, 0xc6)
 	videoData = append(videoData, data2...)
-	//audio 3
+	// audio 3
 	videoData = append(videoData, 0xc4)
 	videoData = append(videoData, data2...)
 
@@ -73,17 +74,17 @@ func TestConnCrossReading(t *testing.T) {
 		chunks:              make(map[uint32]ChunkStream),
 	}
 	var c ChunkStream
-	//video 1
+	// video 1
 	err := conn.Read(&c)
-	at.Equal(err, nil)
-	at.Equal(int(c.TypeID), 9)
-	at.Equal(len(c.Data), 307)
+	require.NoError(t, err)
+	at.Equal(9, int(c.TypeID))
+	at.Len(c.Data, 307)
 
-	//audio2
+	// audio2
 	err = conn.Read(&c)
-	at.Equal(err, nil)
-	at.Equal(int(c.TypeID), 8)
-	at.Equal(len(c.Data), 307)
+	require.NoError(t, err)
+	at.Equal(8, int(c.TypeID))
+	at.Len(c.Data, 307)
 
 	err = conn.Read(&c)
 	at.Equal(err, io.EOF)
@@ -124,20 +125,20 @@ func TestSetChunksizeForWrite(t *testing.T) {
 	audio.Data[0] = 0xff
 	audio.Data[128] = 0xff
 	err := conn.Write(&audio)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
-	at.Equal(len(buf.Bytes()), 146)
+	at.Len(buf.Bytes(), 146)
 
 	buf.Reset()
 	err = conn.Write(&chunk)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
 
 	buf.Reset()
 	err = conn.Write(&audio)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
-	at.Equal(len(buf.Bytes()), 145)
+	at.Len(buf.Bytes(), 145)
 }
 
 func TestSetChunksize(t *testing.T) {
@@ -164,18 +165,20 @@ func TestSetChunksize(t *testing.T) {
 
 	var c ChunkStream
 	err := conn.Read(&c)
-	at.Equal(err, nil)
-	at.Equal(int(c.TypeID), 9)
-	at.Equal(int(c.CSID), 6)
-	at.Equal(int(c.StreamID), 1)
-	at.Equal(len(c.Data), 307)
+	require.NoError(t, err)
+	at.Equal(9, int(c.TypeID))
+	at.Equal(6, int(c.CSID))
+	at.Equal(1, int(c.StreamID))
+	at.Len(c.Data, 307)
 
-	//设置chunksize
-	chunkBuf := []byte{0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x96}
+	// 设置chunksize
+	chunkBuf := []byte{
+		0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x96,
+	}
 	conn.rw = NewReadWriter(bytes.NewBuffer(chunkBuf), 1024)
 	err = conn.Read(&c)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 
 	data = data[:12]
 	data[7] = 0x8
@@ -189,8 +192,8 @@ func TestSetChunksize(t *testing.T) {
 
 	conn.rw = NewReadWriter(bytes.NewBuffer(data), 1024)
 	err = conn.Read(&c)
-	at.Equal(err, nil)
-	at.Equal(len(c.Data), 307)
+	require.NoError(t, err)
+	at.Len(c.Data, 307)
 
 	err = conn.Read(&c)
 	at.Equal(err, io.EOF)
@@ -217,11 +220,11 @@ func TestConnWrite(t *testing.T) {
 		Data:      []byte{0x01, 0x02, 0x03},
 	}
 	err := conn.Write(&c1)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
-	at.Equal(wr.Bytes(), []byte{0x4, 0x0, 0x0, 0x28, 0x0, 0x0, 0x3, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3})
+	at.Equal([]byte{0x4, 0x0, 0x0, 0x28, 0x0, 0x0, 0x3, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3}, wr.Bytes())
 
-	//for type 1
+	// for type 1
 	wr.Reset()
 	c1 = ChunkStream{
 		Length:    4,
@@ -231,15 +234,15 @@ func TestConnWrite(t *testing.T) {
 		Data:      []byte{0x01, 0x02, 0x03, 0x4},
 	}
 	err = conn.Write(&c1)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
-	at.Equal(wr.Bytes(), []byte{0x4, 0x0, 0x0, 0x50, 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3, 0x4})
+	at.Equal([]byte{0x4, 0x0, 0x0, 0x50, 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3, 0x4}, wr.Bytes())
 
-	//for type 2
+	// for type 2
 	wr.Reset()
 	c1.Timestamp = 160
 	err = conn.Write(&c1)
-	at.Equal(err, nil)
+	require.NoError(t, err)
 	conn.Flush()
-	at.Equal(wr.Bytes(), []byte{0x4, 0x0, 0x0, 0xa0, 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3, 0x4})
+	at.Equal([]byte{0x4, 0x0, 0x0, 0xa0, 0x0, 0x0, 0x4, 0x8, 0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3, 0x4}, wr.Bytes())
 }

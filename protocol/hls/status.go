@@ -4,7 +4,7 @@ import "time"
 
 type status struct {
 	hasVideo       bool
-	seqId          int64
+	seqID          int64
 	createdAt      time.Time
 	segBeginAt     time.Time
 	hasSetFirstTs  bool
@@ -14,7 +14,7 @@ type status struct {
 
 func newStatus() *status {
 	return &status{
-		seqId:         0,
+		seqID:         0,
 		hasSetFirstTs: false,
 		segBeginAt:    time.Now(),
 	}
@@ -32,7 +32,7 @@ func (t *status) update(isVideo bool, timestamp uint32) {
 }
 
 func (t *status) resetAndNew() {
-	t.seqId++
+	t.seqID++
 	t.hasVideo = false
 	t.createdAt = time.Now()
 	t.hasSetFirstTs = false

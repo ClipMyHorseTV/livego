@@ -3,8 +3,8 @@ package hls
 import "bytes"
 
 const (
-	cache_max_frames byte = 6
-	audio_cache_len  int  = 10 * 1024
+	cacheMaxFrames byte = 6
+	audioCacheLen  int  = 10 * 1024
 )
 
 type audioCache struct {
@@ -17,7 +17,7 @@ type audioCache struct {
 
 func newAudioCache() *audioCache {
 	return &audioCache{
-		buf: bytes.NewBuffer(make([]byte, audio_cache_len)),
+		buf: bytes.NewBuffer(make([]byte, audioCacheLen)),
 	}
 }
 

@@ -1,6 +1,7 @@
 package configure
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ClipMyHorseTV/livego/utils/uid"
@@ -41,21 +42,21 @@ func Init() {
 	log.Info("Redis connected")
 }
 
-// set/reset a random key for channel
+// SetKey sets or resets a random key for channel.
 func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 	if !saveInLocal {
 		for {
 			key = uid.RandStringRunes(48)
-			if _, err = r.redisCli.Get(key).Result(); err == redis.Nil {
+			if _, err = r.redisCli.Get(key).Result(); errors.Is(err, redis.Nil) {
 				err = r.redisCli.Set(channel, key, 0).Err()
 				if err != nil {
-					return
+					return key, err
 				}
 
 				err = r.redisCli.Set(key, channel, 0).Err()
-				return
+				return key, err
 			} else if err != nil {
-				return
+				return key, err
 			}
 		}
 	}
@@ -68,28 +69,28 @@ func (r *RoomKeysType) SetKey(channel string) (key string, err error) {
 			break
 		}
 	}
-	return
+	return key, err
 }
 
 func (r *RoomKeysType) GetKey(channel string) (newKey string, err error) {
 	if !saveInLocal {
-		if newKey, err = r.redisCli.Get(channel).Result(); err == redis.Nil {
+		if newKey, err = r.redisCli.Get(channel).Result(); errors.Is(err, redis.Nil) {
 			newKey, err = r.SetKey(channel)
 			log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
-			return
+			return newKey, err
 		}
 
-		return
+		return newKey, err
 	}
 
-	var key interface{}
-	var found bool
-	if key, found = r.localCache.Get(channel); found {
-		return key.(string), nil
+	if key, found := r.localCache.Get(channel); found {
+		if s, ok := key.(string); ok {
+			return s, nil
+		}
 	}
 	newKey, err = r.SetKey(channel)
 	log.Debugf("[KEY] new channel [%s]: %s", channel, newKey)
-	return
+	return newKey, err
 }
 
 func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {
@@ -97,12 +98,12 @@ func (r *RoomKeysType) GetChannel(key string) (channel string, err error) {
 		return r.redisCli.Get(key).Result()
 	}
 
-	chann, found := r.localCache.Get(key)
-	if found {
-		return chann.(string), nil
-	} else {
-		return "", fmt.Errorf("%s does not exists", key)
+	if chann, found := r.localCache.Get(key); found {
+		if s, ok := chann.(string); ok {
+			return s, nil
+		}
 	}
+	return "", fmt.Errorf("%s does not exists", key)
 }
 
 func (r *RoomKeysType) DeleteChannel(channel string) bool {
@@ -111,12 +112,14 @@ func (r *RoomKeysType) DeleteChannel(channel string) bool {
 	}
 
 	key, ok := r.localCache.Get(channel)
-	if ok {
-		r.localCache.Delete(channel)
-		r.localCache.Delete(key.(string))
-		return true
+	if !ok {
+		return false
 	}
-	return false
+	r.localCache.Delete(channel)
+	if s, ok := key.(string); ok {
+		r.localCache.Delete(s)
+	}
+	return true
 }
 
 func (r *RoomKeysType) DeleteKey(key string) bool {
@@ -125,10 +128,12 @@ func (r *RoomKeysType) DeleteKey(key string) bool {
 	}
 
 	channel, ok := r.localCache.Get(key)
-	if ok {
-		r.localCache.Delete(channel.(string))
-		r.localCache.Delete(key)
-		return true
+	if !ok {
+		return false
 	}
-	return false
+	if s, ok := channel.(string); ok {
+		r.localCache.Delete(s)
+	}
+	r.localCache.Delete(key)
+	return true
 }

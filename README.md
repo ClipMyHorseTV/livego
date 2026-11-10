@@ -1,90 +1,121 @@
-# OverlayFox/LiveGo-Fork
+<p align="center">
+  <img src="./logo.png" alt="livego" width="200" height="80" />
+</p>
 
-## Why does this fork exist?
+<h3 align="center">A simple, efficient live broadcast server library for Go</h3>
 
-This fork aims to make `livego` more stable and fix some of the bugs. <br>
-The main fixes will be for the RTMP package and initialisation of this system. Primarily so that it can be used as a library inside of other GoLang projects.
-
-If at any point the original creator wants to merge this fork into the upstream branch they are free to do so.
-
-> ℹ️ **Info**: This fork will not be maintained as a standalone system like the upstream repo. <br>
-> This forks aims to make `livego` usable as a standalone package
+<p align="center">
+  <a href="https://github.com/ClipMyHorseTV/livego/actions/workflows/test.yml"><img src="https://github.com/ClipMyHorseTV/livego/actions/workflows/test.yml/badge.svg" alt="Test" /></a>
+  <a href="https://github.com/ClipMyHorseTV/livego/actions/workflows/codeql.yml"><img src="https://github.com/ClipMyHorseTV/livego/actions/workflows/codeql.yml/badge.svg" alt="CodeQL Advanced" /></a>
+  <a href="https://pkg.go.dev/github.com/ClipMyHorseTV/livego"><img src="https://pkg.go.dev/badge/github.com/ClipMyHorseTV/livego.svg" alt="Go Reference" /></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+</p>
 
 ---
 
-<p align='center'>
-    <img src='./logo.png' width='200px' height='80px'/>
-</p>
+> [!NOTE]
+> **Why does this fork exist?**
+> This fork turns [gwuhaolin/livego](https://github.com/gwuhaolin/livego) into a Go package you can embed in your own programs, rather than a standalone server binary.
 
-[![Test](https://github.com/gwuhaolin/livego/actions/workflows/test.yml/badge.svg)](https://github.com/gwuhaolin/livego/actions/workflows/test.yml)
-[![Release](https://github.com/gwuhaolin/livego/actions/workflows/release.yml/badge.svg)](https://github.com/gwuhaolin/livego/actions/workflows/release.yml)
-[![CodeQL Advanced](https://github.com/gwuhaolin/livego/actions/workflows/codeql.yml/badge.svg)](https://github.com/gwuhaolin/livego/actions/workflows/codeql.yml)
+## Features
 
-Simple and efficient live broadcast server:
+- 🧩 **Embeddable** in your own Go program
+- ⚡ **Pure Go**, high performance and cross-platform
+- 📡 **Common protocols and formats** supported out of the box
 
-- Very simple to install and use;
-- Pure Golang, high performance, and cross-platform;
-- Supports commonly used transmission protocols, file formats, and encoding formats;
-
-#### Supported transport protocols
-
-- RTMP
-- AMF
-- HLS
-- HTTP-FLV
-
-#### Supported container formats
-
-- FLV
-- TS
-
-#### Supported encoding formats
-
-- H264
-- AAC
-- MP3
+| Transport protocols | Container formats | Encoding formats |
+| ------------------- | ----------------- | ---------------- |
+| RTMP                | FLV               | H264             |
+| AMF                 | TS                | AAC              |
+| HLS                 |                   | MP3              |
+| HTTP-FLV            |                   |                  |
 
 ## Installation
 
-After directly downloading the compiled [binary file](https://github.com/gwuhaolin/livego/releases), execute it on the command line.
-
-#### Boot from Docker
-
-Run `docker run -p 1935:1935 -p 7001:7001 -p 7002:7002 -p 8090:8090 -d gwuhaolin/livego` to start
-
-#### Compile from source
-
-1. Download the source code `git clone https://github.com/gwuhaolin/livego.git`
-2. Go to the livego directory and execute `go build` or `make build`
-
-## Use
-
-1. Start the service: execute the livego binary file or `make run` to start the livego service;
-2. Get a channelkey(used for push the video stream) from `http://localhost:8090/control/get?room=movie` and copy data like your channelkey.
-3. Upstream push: Push the video stream to `rtmp://localhost:1935/{appname}/{channelkey}` through the` RTMP` protocol(default appname is `live`), for example, use `ffmpeg -re -i demo.flv -c copy -f flv rtmp://localhost:1935/{appname}/{channelkey}` push([download demo flv](https://s3plus.meituan.net/v1/mss_7e425c4d9dcb4bb4918bbfa2779e6de1/mpack/default/demo.flv));
-4. Downstream playback: The following three playback protocols are supported, and the playback address is as follows:
-   - `RTMP`:`rtmp://localhost:1935/{appname}/movie`
-   - `FLV`:`http://127.0.0.1:7001/{appname}/movie.flv`
-   - `HLS`:`http://127.0.0.1:7002/{appname}/movie.m3u8`
-5. Use hls via https: generate ssl certificate(server.key, server.crt files), place them in directory with executable file, change "use_hls_https" option in livego.yaml to true (false by default)
-
-all options:
+Requires **Go 1.22** or newer.
 
 ```bash
-./livego  -h
-Usage of ./livego:
-      --api_addr string       HTTP manage interface server listen address (default ":8090")
-      --config_file string    configure filename (default "livego.yaml")
-      --flv_dir string        output flv file at flvDir/APP/KEY_TIME.flv (default "tmp")
-      --gop_num int           gop num (default 1)
-      --hls_addr string       HLS server listen address (default ":7002")
-      --hls_keep_after_end    Maintains the HLS after the stream ends
-      --httpflv_addr string   HTTP-FLV server listen address (default ":7001")
-      --level string          Log level (default "info")
-      --read_timeout int      read time out (default 10)
-      --rtmp_addr string      RTMP server listen address
+go get github.com/ClipMyHorseTV/livego
 ```
 
-### [Use with flv.js](https://github.com/gwuhaolin/blog/issues/3)
+## Quick start
 
-Interested in Golang? Please see [Golang Chinese Learning Materials Summary](http://go.wuhaolin.cn/)
+Start an RTMP server that also serves HLS:
+
+```go
+package main
+
+import (
+	"log"
+	"net"
+
+	"github.com/ClipMyHorseTV/livego/protocol/hls"
+	"github.com/ClipMyHorseTV/livego/protocol/rtmp"
+)
+
+func main() {
+	stream := rtmp.NewRtmpStream()
+
+	hlsListener, err := net.Listen("tcp", ":7002")
+	if err != nil {
+		log.Fatal(err)
+	}
+	hlsServer := hls.NewServer()
+	go hlsServer.Serve(hlsListener)
+
+	rtmpListener, err := net.Listen("tcp", ":1935")
+	if err != nil {
+		log.Fatal(err)
+	}
+	rtmpServer := rtmp.NewRtmpServer(stream, hlsServer)
+	log.Fatal(rtmpServer.Serve(rtmpListener))
+}
+```
+
+HTTP-FLV playback and the HTTP management API are added the same way:
+
+| Package   | Constructor                       | Typical address |
+| --------- | --------------------------------- | --------------- |
+| `rtmp`    | `rtmp.NewRtmpServer(stream, hls)` | `:1935`         |
+| `httpflv` | `httpflv.NewServer(stream)`       | `:7001`         |
+| `hls`     | `hls.NewServer()`                 | `:7002`         |
+| `api`     | `api.NewServer(stream, rtmpAddr)` | `:8090`         |
+
+## Streaming
+
+With the servers running:
+
+1. **Get a channel key** (used to push the stream) from the API:
+
+   ```text
+   http://localhost:8090/control/get?room=movie
+   ```
+
+2. **Push a stream** to `rtmp://localhost:1935/{appname}/{channelkey}` (the default `appname` is `live`), for example with ffmpeg and the [demo FLV](https://s3plus.meituan.net/v1/mss_7e425c4d9dcb4bb4918bbfa2779e6de1/mpack/default/demo.flv):
+
+   ```bash
+   ffmpeg -re -i demo.flv -c copy -f flv rtmp://localhost:1935/{appname}/{channelkey}
+   ```
+
+3. **Play it back** with any of:
+
+   | Protocol | URL                                          |
+   | -------- | -------------------------------------------- |
+   | RTMP     | `rtmp://localhost:1935/{appname}/movie`      |
+   | HTTP-FLV | `http://127.0.0.1:7001/{appname}/movie.flv`  |
+   | HLS      | `http://127.0.0.1:7002/{appname}/movie.m3u8` |
+
+## Configuration
+
+Settings are read through `configure.Config`, in this order:
+
+1. Built-in defaults
+2. A `livego.yaml` in the working directory (see [livego.yaml](./livego.yaml) for the available keys)
+3. Environment variables
+
+> [!WARNING]
+> Importing any package that depends on `configure` currently also registers and parses livego's command-line flags.
+
+## License
+
+[MIT](./LICENSE). Based on [gwuhaolin/livego](https://github.com/gwuhaolin/livego).

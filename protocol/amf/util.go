@@ -4,24 +4,39 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"os"
+	"strings"
 )
 
+// DumpBytes writes the first size bytes of buf to stdout as hex, for debugging.
 func DumpBytes(label string, buf []byte, size int) {
-	fmt.Printf("Dumping %s (%d bytes):\n", label, size)
-	for i := 0; i < size; i++ {
-		fmt.Printf("0x%02x ", buf[i])
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Dumping %s (%d bytes):\n", label, size)
+	for i := range size {
+		fmt.Fprintf(&sb, "0x%02x ", buf[i])
 	}
-	fmt.Printf("\n")
+	sb.WriteString("\n")
+	_, _ = os.Stdout.WriteString(sb.String())
 }
 
-func Dump(label string, val interface{}) error {
-	json, err := json.MarshalIndent(val, "", "  ")
+// Dump writes val to stdout as indented JSON, for debugging.
+func Dump(label string, val any) error {
+	data, err := json.MarshalIndent(val, "", "  ")
 	if err != nil {
-		return fmt.Errorf("Error dumping %s: %s", label, err)
+		return fmt.Errorf("error dumping %s: %w", label, err)
 	}
 
-	fmt.Printf("Dumping %s:\n%s\n", label, json)
-	return nil
+	_, err = fmt.Fprintf(os.Stdout, "Dumping %s:\n%s\n", label, data)
+	return err
+}
+
+// lenUint32 converts a length to a uint32 length field, failing if it does not fit.
+func lenUint32(n int) (uint32, error) {
+	if n < 0 || int64(n) > math.MaxUint32 {
+		return 0, fmt.Errorf("length %d out of uint32 range", n)
+	}
+	return uint32(n), nil
 }
 
 func WriteByte(w io.Writer, b byte) (err error) {
@@ -30,7 +45,7 @@ func WriteByte(w io.Writer, b byte) (err error) {
 
 	_, err = WriteBytes(w, bytes)
 
-	return
+	return err
 }
 
 func WriteBytes(w io.Writer, bytes []byte) (int, error) {
@@ -70,7 +85,7 @@ func ReadMarker(r io.Reader) (byte, error) {
 }
 
 func AssertMarker(r io.Reader, checkMarker bool, m byte) error {
-	if checkMarker == false {
+	if !checkMarker {
 		return nil
 	}
 
