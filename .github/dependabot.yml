@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Wait before taking new releases, security updates are not delayed
+    cooldown:
+      default-days: 7
+    # Major updates stay in their own PRs as they are more likely to break
+    groups:
+      go-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
