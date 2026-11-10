@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ClipMyHorseTV/livego/configure"
-
 	"github.com/ClipMyHorseTV/livego/av"
 	"github.com/ClipMyHorseTV/livego/container/flv"
 	"github.com/ClipMyHorseTV/livego/container/ts"
@@ -27,6 +25,7 @@ const (
 type Source struct {
 	av.RWBaser
 
+	config      Config
 	seq         int
 	info        av.Info
 	bwriter     *bytes.Buffer
@@ -43,9 +42,10 @@ type Source struct {
 	packetQueue chan *av.Packet
 }
 
-func NewSource(info av.Info) *Source {
+func NewSource(config Config, info av.Info) *Source {
 	info.Inter = true
 	s := &Source{
+		config:      config,
 		info:        info,
 		align:       &align{},
 		stat:        newStatus(),
@@ -191,7 +191,7 @@ func (source *Source) cleanup() {
 
 func (source *Source) Close(err error) {
 	log.Debug("hls source closed: ", source.info)
-	if !source.closed && !configure.Config.GetBool("hls_keep_after_end") {
+	if !source.closed && !source.config.KeepAfterEnd {
 		source.cleanup()
 	}
 	source.closed = true

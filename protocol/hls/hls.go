@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ClipMyHorseTV/livego/configure"
-
 	"github.com/ClipMyHorseTV/livego/av"
 
 	log "github.com/sirupsen/logrus"
@@ -36,13 +34,17 @@ var crossdomainxml = []byte(`<?xml version="1.0" ?>
 </cross-domain-policy>`)
 
 type Server struct {
+	config Config
+
 	listener net.Listener
 	conns    *sync.Map
 }
 
-func NewServer() *Server {
+// NewServer creates a new HLS server
+func NewServer(config Config) *Server {
 	ret := &Server{
-		conns: &sync.Map{},
+		config: config,
+		conns:  &sync.Map{},
 	}
 	go ret.checkStop()
 	return ret
@@ -59,7 +61,7 @@ func (server *Server) Serve(listener net.Listener) error {
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	if configure.Config.GetBool("use_hls_https") {
+	if server.config.Encrypted {
 		return srv.ServeTLS(listener, "server.crt", "server.key")
 	}
 	return srv.Serve(listener)
@@ -70,7 +72,7 @@ func (server *Server) GetWriter(info av.Info) av.WriteCloser {
 		return s
 	}
 	log.Debug("new hls source")
-	s := NewSource(info)
+	s := NewSource(server.config, info)
 	server.conns.Store(info.Key, s)
 	return s
 }
@@ -96,7 +98,7 @@ func (server *Server) checkStop() {
 			if !ok {
 				return true
 			}
-			if !v.Alive() && !configure.Config.GetBool("hls_keep_after_end") {
+			if !v.Alive() && !server.config.KeepAfterEnd {
 				log.Debug("check stop and remove: ", v.Info())
 				server.conns.Delete(key)
 			}
