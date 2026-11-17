@@ -326,7 +326,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 		res.Data = retString
 		log.Debugf("pull stop return %s", retString)
 	} else {
-		pullRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
+		pullRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl, s.config.Relay)
 		log.Debugf("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pullRtmprelay.Start()
 		if err != nil {
@@ -390,7 +390,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 		res.Data = retString
 		log.Debugf("push stop return %s", retString)
 	} else {
-		pushRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
+		pushRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl, s.config.Relay)
 		log.Debugf("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pushRtmprelay.Start()
 		if err != nil {

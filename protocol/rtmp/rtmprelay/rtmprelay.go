@@ -23,10 +23,14 @@ type RtmpRelay struct {
 	connectPlayClient    *core.ConnClient
 	connectPublishClient *core.ConnClient
 	startflag            bool
+	config               core.Config
 }
 
-func NewRtmpRelay(playurl *string, publishurl *string) *RtmpRelay {
+// NewRtmpRelay creates a relay pulling playurl and pushing it to publishurl. config configures both
+// connections.
+func NewRtmpRelay(playurl *string, publishurl *string, config core.Config) *RtmpRelay {
 	return &RtmpRelay{
+		config:               config,
 		PlayURL:              *playurl,
 		PublishURL:           *publishurl,
 		csChan:               make(chan core.ChunkStream, 500),
@@ -91,8 +95,8 @@ func (r *RtmpRelay) Start() error {
 		return fmt.Errorf("the rtmprelay already started, playurl=%s, publishurl=%s", r.PlayURL, r.PublishURL)
 	}
 
-	r.connectPlayClient = core.NewConnClient()
-	r.connectPublishClient = core.NewConnClient()
+	r.connectPlayClient = core.NewConnClient(r.config)
+	r.connectPublishClient = core.NewConnClient(r.config)
 
 	log.Debugf("play server addr:%v starting....", r.PlayURL)
 	err := r.connectPlayClient.Start(r.PlayURL, av.PLAY)

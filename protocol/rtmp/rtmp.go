@@ -14,7 +14,6 @@ import (
 	"github.com/ClipMyHorseTV/livego/utils/uid"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/container/flv"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/core"
 	"github.com/ClipMyHorseTV/livego/roomkey"
@@ -27,35 +26,33 @@ const (
 	SaveStaticsInterval = 5000
 )
 
-var (
-	readTimeout  = configure.Config.GetInt("read_timeout")
-	writeTimeout = configure.Config.GetInt("write_timeout")
-)
-
 type Client struct {
+	config  Config
 	handler av.Handler
 	getter  av.GetWriter
 }
 
-func NewRtmpClient(h av.Handler, getter av.GetWriter) *Client {
+// NewRtmpClient creates an RTMP client. Only the timeouts and Core of config are used.
+func NewRtmpClient(config Config, h av.Handler, getter av.GetWriter) *Client {
 	return &Client{
+		config:  config,
 		handler: h,
 		getter:  getter,
 	}
 }
 
 func (c *Client) Dial(url string, method string) error {
-	connClient := core.NewConnClient()
+	connClient := core.NewConnClient(c.config.Core)
 	if err := connClient.Start(url, method); err != nil {
 		return err
 	}
 	switch method {
 	case av.PUBLISH:
-		writer := NewVirWriter(connClient)
+		writer := NewVirWriter(connClient, c.config.WriteTimeout)
 		log.Debugf("client Dial call NewVirWriter url=%s, method=%s", url, method)
 		c.handler.HandleWriter(writer)
 	case av.PLAY:
-		reader := NewVirReader(connClient)
+		reader := NewVirReader(connClient, c.config.ReadTimeout)
 		log.Debugf("client Dial call NewVirReader url=%s, method=%s", url, method)
 		c.handler.HandleReader(reader)
 		if c.getter != nil {
@@ -72,6 +69,7 @@ func (c *Client) GetHandle() av.Handler {
 
 type Server struct {
 	config  Config
+	dvr     *flv.FlvDvr
 	keys    roomkey.Store
 	handler av.Handler
 	getter  av.GetWriter
@@ -80,13 +78,22 @@ type Server struct {
 // NewRtmpServer creates an RTMP server. keys resolves stream keys to channels on publish and must be
 // the same Store given to the API server. If keys is nil, NoAuth must be set and publishers push
 // directly under the stream name.
-func NewRtmpServer(config Config, keys roomkey.Store, h av.Handler, getter av.GetWriter) *Server {
-	return &Server{
+// If config.FLVDir is set, published streams are additionally archived as FLV files.
+func NewRtmpServer(config Config, keys roomkey.Store, h av.Handler, getter av.GetWriter) (*Server, error) {
+	s := &Server{
 		config:  config,
 		keys:    keys,
 		handler: h,
 		getter:  getter,
 	}
+	if config.FLVDir != "" {
+		dvr, err := flv.NewFlvDvr(config.FLVDir)
+		if err != nil {
+			return nil, fmt.Errorf("create flv archive: %w", err)
+		}
+		s.dvr = dvr
+	}
+	return s, nil
 }
 
 func (s *Server) Serve(listener net.Listener) (err error) {
@@ -132,7 +139,7 @@ func (s *Server) handleConn(conn *core.Conn) error {
 
 	appname, name, _ := connServer.GetInfo()
 
-	if ret := configure.CheckAppName(appname); !ret {
+	if !s.config.CheckAppName(appname) {
 		err := fmt.Errorf("application name=%s is not configured", appname)
 		closeConn(conn, "CheckAppName err: ", err)
 		return err
@@ -140,7 +147,7 @@ func (s *Server) handleConn(conn *core.Conn) error {
 
 	log.Debugf("handleConn: IsPublisher=%v", connServer.IsPublisher())
 	if !connServer.IsPublisher() {
-		writer := NewVirWriter(connServer)
+		writer := NewVirWriter(connServer, s.config.WriteTimeout)
 		log.Debugf("new player: %+v", writer.Info())
 		s.handler.HandleWriter(writer)
 		return nil
@@ -158,10 +165,10 @@ func (s *Server) handlePublisher(conn *core.Conn, connServer *core.ConnServer, a
 		return err
 	}
 	connServer.PublishInfo.Name = channel
-	if pushlist, ret := configure.GetStaticPushURLList(appname); ret && (pushlist != nil) {
-		log.Debugf("GetStaticPushUrlList: %v", pushlist)
+	if pushlist := s.config.Relay.StaticPushURLs(appname); len(pushlist) > 0 {
+		log.Debugf("static push urls for %s: %v", appname, pushlist)
 	}
-	reader := NewVirReader(connServer)
+	reader := NewVirReader(connServer, s.config.ReadTimeout)
 	s.handler.HandleReader(reader)
 	log.Debugf("new publisher: %+v", reader.Info())
 
@@ -171,9 +178,10 @@ func (s *Server) handlePublisher(conn *core.Conn, connServer *core.ConnServer, a
 		writer := s.getter.GetWriter(reader.Info())
 		s.handler.HandleWriter(writer)
 	}
-	if configure.Config.GetBool("flv_archive") {
-		flvWriter := new(flv.FlvDvr)
-		s.handler.HandleWriter(flvWriter.GetWriter(reader.Info()))
+	if s.dvr != nil {
+		if writer := s.dvr.GetWriter(reader.Info()); writer != nil {
+			s.handler.HandleWriter(writer)
+		}
 	}
 	return nil
 }
@@ -276,11 +284,11 @@ type VirWriter struct {
 	WriteBWInfo StaticsBW
 }
 
-func NewVirWriter(conn StreamReadWriteCloser) *VirWriter {
+func NewVirWriter(conn StreamReadWriteCloser, timeout time.Duration) *VirWriter {
 	ret := &VirWriter{
 		Uid:         uid.NewID(),
 		conn:        conn,
-		RWBaser:     av.NewRWBaser(time.Second * time.Duration(writeTimeout)),
+		RWBaser:     av.NewRWBaser(timeout),
 		packetQueue: make(chan *av.Packet, maxQueueNum),
 		done:        make(chan struct{}),
 		WriteBWInfo: StaticsBW{0, 0, 0, 0, 0, 0, 0, 0},
@@ -505,11 +513,11 @@ type VirReader struct {
 	ReadBWInfo StaticsBW
 }
 
-func NewVirReader(conn StreamReadWriteCloser) *VirReader {
+func NewVirReader(conn StreamReadWriteCloser, timeout time.Duration) *VirReader {
 	return &VirReader{
 		Uid:        uid.NewID(),
 		conn:       conn,
-		RWBaser:    av.NewRWBaser(time.Second * time.Duration(readTimeout)),
+		RWBaser:    av.NewRWBaser(timeout),
 		demuxer:    flv.NewDemuxer(),
 		ReadBWInfo: StaticsBW{0, 0, 0, 0, 0, 0, 0, 0},
 	}

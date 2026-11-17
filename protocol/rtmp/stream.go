@@ -16,11 +16,15 @@ import (
 var EmptyID = ""
 
 type RtmpStream struct {
+	config  *Config
 	streams *sync.Map // key
 }
 
-func NewRtmpStream() *RtmpStream {
+// NewRtmpStream creates the stream handler. config supplies the GOP cache size, the static push
+// targets and the TLS config used to dial them.
+func NewRtmpStream(config Config) *RtmpStream {
 	ret := &RtmpStream{
+		config:  &config,
 		streams: &sync.Map{},
 	}
 	go ret.CheckAlive()
@@ -36,7 +40,7 @@ func (rs *RtmpStream) HandleReader(r av.ReadCloser) {
 		stream.TransStop()
 		id := stream.ID()
 		if id != EmptyID && id != info.UID {
-			ns := NewStream()
+			ns := NewStream(rs.config)
 			stream.Copy(ns)
 			stream = ns
 			rs.streams.Store(info.Key, ns)
@@ -45,7 +49,7 @@ func (rs *RtmpStream) HandleReader(r av.ReadCloser) {
 		return
 	}
 
-	stream := NewStream()
+	stream := NewStream(rs.config)
 	rs.streams.Store(info.Key, stream)
 	stream.info = info
 	stream.AddReader(r)
@@ -62,7 +66,7 @@ func (rs *RtmpStream) HandleWriter(w av.WriteCloser) {
 	}
 
 	log.Debugf("HandleWriter: not found create new info[%v]", info)
-	s := NewStream()
+	s := NewStream(rs.config)
 	rs.streams.Store(info.Key, s)
 	s.info = info
 }
@@ -85,6 +89,7 @@ func (rs *RtmpStream) CheckAlive() {
 }
 
 type Stream struct {
+	config  *Config
 	isStart bool
 	cache   *cache.Cache
 	r       av.ReadCloser
@@ -101,10 +106,11 @@ func (p *PackWriterCloser) GetWriter() av.WriteCloser {
 	return p.w
 }
 
-func NewStream() *Stream {
+func NewStream(config *Config) *Stream {
 	return &Stream{
-		cache: cache.NewCache(),
-		ws:    &sync.Map{},
+		config: config,
+		cache:  cache.NewCache(config.Cache),
+		ws:     &sync.Map{},
 	}
 }
 
@@ -167,9 +173,9 @@ func (s *Stream) StartStaticPush() {
 	appname := dscr[0]
 
 	log.Debugf("StartStaticPush: current streamname=%s， appname=%s", streamname, appname)
-	pushurllist, err := rtmprelay.GetStaticPushList(appname)
-	if err != nil || len(pushurllist) < 1 {
-		log.Debugf("StartStaticPush: GetStaticPushList error=%v", err)
+	pushurllist := s.config.Relay.StaticPushURLs(appname)
+	if len(pushurllist) < 1 {
+		log.Debugf("StartStaticPush: no static push url for appname=%s", appname)
 		return
 	}
 
@@ -177,7 +183,7 @@ func (s *Stream) StartStaticPush() {
 		pushurl := baseURL + "/" + streamname
 		log.Debugf("StartStaticPush: static pushurl=%s", pushurl)
 
-		staticpushObj := rtmprelay.GetAndCreateStaticPushObject(pushurl)
+		staticpushObj := rtmprelay.GetAndCreateStaticPushObject(pushurl, s.config.Core)
 		if staticpushObj != nil {
 			if err := staticpushObj.Start(); err != nil {
 				log.Debugf("StartStaticPush: staticpushObj.Start %s error=%v", pushurl, err)
@@ -208,9 +214,9 @@ func (s *Stream) StopStaticPush() {
 	appname := dscr[0]
 
 	log.Debugf("StopStaticPush: current streamname=%s， appname=%s", streamname, appname)
-	pushurllist, err := rtmprelay.GetStaticPushList(appname)
-	if err != nil || len(pushurllist) < 1 {
-		log.Debugf("StopStaticPush: GetStaticPushList error=%v", err)
+	pushurllist := s.config.Relay.StaticPushURLs(appname)
+	if len(pushurllist) < 1 {
+		log.Debugf("StopStaticPush: no static push url for appname=%s", appname)
 		return
 	}
 
@@ -240,9 +246,9 @@ func (s *Stream) IsSendStaticPush() bool {
 	appname := dscr[0]
 
 	// log.Debugf("SendStaticPush: current streamname=%s， appname=%s", streamname, appname)
-	pushurllist, err := rtmprelay.GetStaticPushList(appname)
-	if err != nil || len(pushurllist) < 1 {
-		// log.Debugf("SendStaticPush: GetStaticPushList error=%v", err)
+	pushurllist := s.config.Relay.StaticPushURLs(appname)
+	if len(pushurllist) < 1 {
+		// log.Debugf("SendStaticPush: no static push url for appname=%s", appname)
 		return false
 	}
 
@@ -286,9 +292,9 @@ func (s *Stream) SendStaticPush(packet av.Packet) {
 	appname := dscr[0]
 
 	// log.Debugf("SendStaticPush: current streamname=%s， appname=%s", streamname, appname)
-	pushurllist, err := rtmprelay.GetStaticPushList(appname)
-	if err != nil || len(pushurllist) < 1 {
-		// log.Debugf("SendStaticPush: GetStaticPushList error=%v", err)
+	pushurllist := s.config.Relay.StaticPushURLs(appname)
+	if len(pushurllist) < 1 {
+		// log.Debugf("SendStaticPush: no static push url for appname=%s", appname)
 		return
 	}
 

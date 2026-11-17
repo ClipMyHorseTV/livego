@@ -2,7 +2,6 @@ package cache
 
 import (
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 )
 
 type Cache struct {
@@ -12,9 +11,10 @@ type Cache struct {
 	metadata *SpecialCache
 }
 
-func NewCache() *Cache {
+// NewCache creates a cache holding the last config.GopNum GOPs.
+func NewCache(config Config) *Cache {
 	return &Cache{
-		gop:      NewGopCache(configure.Config.GetInt("gop_num")),
+		gop:      NewGopCache(config.GopNum),
 		videoSeq: NewSpecialCache(),
 		audioSeq: NewSpecialCache(),
 		metadata: NewSpecialCache(),
