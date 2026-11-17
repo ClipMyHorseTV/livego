@@ -61,25 +61,27 @@ type ClientInfo struct {
 }
 
 type Server struct {
+	config Config
+
 	handler  av.Handler
 	session  map[string]*rtmprelay.RtmpRelay
 	rtmpAddr string
 }
 
-func NewServer(h av.Handler, rtmpAddr string) *Server {
+func NewServer(config Config, h av.Handler, rtmpAddr string) *Server {
 	return &Server{
+		config: config,
+
 		handler:  h,
 		session:  make(map[string]*rtmprelay.RtmpRelay),
 		rtmpAddr: rtmpAddr,
 	}
 }
 
-func JWTMiddleware(next http.Handler) http.Handler {
-	isJWT := len(configure.Config.GetString("jwt.secret")) > 0
-	if !isJWT {
+func (s *Server) JWTMiddleware(next http.Handler) http.Handler {
+	if !(len(s.config.JWT.Secret) > 0) {
 		return next
 	}
-
 	log.Info("Using JWT middleware")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,16 +91,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		var algorithm jwt.SigningMethod
-		if len(configure.Config.GetString("jwt.algorithm")) > 0 {
-			algorithm = jwt.GetSigningMethod(configure.Config.GetString("jwt.algorithm"))
-		}
-
-		if algorithm == nil {
-			algorithm = jwt.SigningMethodHS256
-		}
-
-		if err := validateJWT(r, algorithm); err != nil {
+		if err := validateJWT(r, s.config.JWT.Algorithm); err != nil {
 			res := &Response{
 				w:      w,
 				Status: 403,
