@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ClipMyHorseTV/livego/av"
+	"github.com/ClipMyHorseTV/livego/utils/pio"
 )
 
 type flvTag struct {
@@ -175,9 +176,8 @@ func (tag *Tag) parseVideoHeader(b []byte) (n int, err error) {
 	n++
 	if tag.mediat.frameType == av.FrameInter || tag.mediat.frameType == av.FrameKey {
 		tag.mediat.avcPacketType = b[1]
-		for i := 2; i < 5; i++ {
-			tag.mediat.compositionTime = tag.mediat.compositionTime<<8 + int32(b[i])
-		}
+		// CompositionTime is a signed 24-bit value (SI24)
+		tag.mediat.compositionTime = pio.I24BE(b[2:5])
 		n += 4
 	}
 	return n, err

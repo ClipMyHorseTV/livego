@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependabot Runner.
 - Test coverage summary as a PR comment, and a coverage badge in the README.
 - Tests for the API JWT middleware.
+- Tests for the FLV tag parser, demuxer and writer, the AAC and MP3 parsers, the RTMP GOP cache,
+  stream fan-out and handshake, the HLS playlist and the `pio` helpers.
 - `roomkey.Store` interface for stream keys, with an in-memory implementation (`roomkey.NewMemoryStore`).
 - Per-package config structs that replace the global `configure` package:
   - `api.Config` and `api.DefaultConfig()` (JWT secret and algorithm, relay connections).
@@ -79,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pushed to the same targets.
 - Deleting a room key from Redis reported success when the delete failed.
 - A failing FLV archive writer was passed to the stream handler as `nil`.
+- A GOP cache with `cache.Config.GopNum` of 3 or more panicked on the first inter frame, and sent
+  the cached GOPs from the wrong position.
+- Negative FLV composition times were read as large positive values (missing sign extension).
 
 ### Removed
 
