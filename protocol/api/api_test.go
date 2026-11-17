@@ -9,8 +9,6 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ClipMyHorseTV/livego/configure"
 )
 
 const testSecret = "test-secret"
@@ -23,12 +21,9 @@ func signToken(t *testing.T, method jwt.SigningMethod, key any, claims jwt.MapCl
 }
 
 func TestJWTMiddleware(t *testing.T) {
-	configure.Config.Set("jwt.secret", testSecret)
-	configure.Config.Set("jwt.algorithm", "HS256")
-	t.Cleanup(func() {
-		configure.Config.Set("jwt.secret", "")
-		configure.Config.Set("jwt.algorithm", "")
-	})
+	config := DefaultConfig()
+	config.JWT.Secret = testSecret
+	s := NewServer(config, nil, nil, "")
 
 	valid := signToken(t, jwt.SigningMethodHS256, []byte(testSecret), jwt.MapClaims{"sub": "test"})
 	expired := signToken(t, jwt.SigningMethodHS256, []byte(testSecret), jwt.MapClaims{
@@ -58,7 +53,7 @@ func TestJWTMiddleware(t *testing.T) {
 		{name: "none algorithm", url: "/", header: "Bearer " + none, want: http.StatusForbidden},
 	}
 
-	handler := JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := s.JWTMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -82,14 +77,14 @@ func TestJWTMiddleware(t *testing.T) {
 }
 
 func TestJWTMiddlewareDisabledWithoutSecret(t *testing.T) {
-	configure.Config.Set("jwt.secret", "")
+	s := NewServer(DefaultConfig(), nil, nil, "")
 
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	rec := httptest.NewRecorder()
 
-	JWTMiddleware(next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	s.JWTMiddleware(next).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 }

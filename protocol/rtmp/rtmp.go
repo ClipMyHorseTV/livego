@@ -1,6 +1,7 @@
 package rtmp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/container/flv"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/core"
+	"github.com/ClipMyHorseTV/livego/roomkey"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -69,12 +71,19 @@ func (c *Client) GetHandle() av.Handler {
 }
 
 type Server struct {
+	config  Config
+	keys    roomkey.Store
 	handler av.Handler
 	getter  av.GetWriter
 }
 
-func NewRtmpServer(h av.Handler, getter av.GetWriter) *Server {
+// NewRtmpServer creates an RTMP server. keys resolves stream keys to channels on publish and must be
+// the same Store given to the API server. If keys is nil, NoAuth must be set and publishers push
+// directly under the stream name.
+func NewRtmpServer(config Config, keys roomkey.Store, h av.Handler, getter av.GetWriter) *Server {
 	return &Server{
+		config:  config,
+		keys:    keys,
 		handler: h,
 		getter:  getter,
 	}
@@ -143,19 +152,9 @@ func (s *Server) handleConn(conn *core.Conn) error {
 // handlePublisher authorizes a publishing connection by its stream key and attaches its reader
 // and the configured writers to the handler.
 func (s *Server) handlePublisher(conn *core.Conn, connServer *core.ConnServer, appname, name string) error {
-	if configure.Config.GetBool("rtmp_noauth") {
-		key, err := configure.RoomKeys.GetKey(name)
-		if err != nil {
-			err = fmt.Errorf("cannot create key: %w", err)
-			closeConn(conn, "GetKey err: ", err)
-			return err
-		}
-		name = key
-	}
-	channel, err := configure.RoomKeys.GetChannel(name)
+	channel, err := s.resolveChannel(context.Background(), name)
 	if err != nil {
-		err = fmt.Errorf("invalid key: %w", err)
-		closeConn(conn, "CheckKey err: ", err)
+		closeConn(conn, "resolve channel err: ", err)
 		return err
 	}
 	connServer.PublishInfo.Name = channel
@@ -177,6 +176,29 @@ func (s *Server) handlePublisher(conn *core.Conn, connServer *core.ConnServer, a
 		s.handler.HandleWriter(flvWriter.GetWriter(reader.Info()))
 	}
 	return nil
+}
+
+// resolveChannel maps the name a publisher pushed with to the channel it publishes to. With NoAuth
+// the name is the channel itself, otherwise it is the channel's stream key.
+func (s *Server) resolveChannel(ctx context.Context, name string) (string, error) {
+	if s.config.NoAuth {
+		if s.keys == nil {
+			return name, nil
+		}
+		key, err := s.keys.GetOrCreateKey(ctx, name)
+		if err != nil {
+			return "", fmt.Errorf("cannot create key: %w", err)
+		}
+		name = key
+	}
+	if s.keys == nil {
+		return "", errors.New("no key store configured and NoAuth is disabled")
+	}
+	channel, err := s.keys.Channel(ctx, name)
+	if err != nil {
+		return "", fmt.Errorf("invalid key: %w", err)
+	}
+	return channel, nil
 }
 
 type GetInFo interface {

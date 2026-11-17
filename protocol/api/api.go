@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/rtmprelay"
+	"github.com/ClipMyHorseTV/livego/roomkey"
 
 	"github.com/golang-jwt/jwt/v5"
 	log "github.com/sirupsen/logrus"
@@ -62,15 +62,19 @@ type ClientInfo struct {
 
 type Server struct {
 	config Config
+	keys   roomkey.Store
 
 	handler  av.Handler
 	session  map[string]*rtmprelay.RtmpRelay
 	rtmpAddr string
 }
 
-func NewServer(config Config, h av.Handler, rtmpAddr string) *Server {
+// NewServer creates an API server. keys must be the same Store passed to the RTMP server so that
+// keys handed out by the API are accepted when publishing.
+func NewServer(config Config, keys roomkey.Store, h av.Handler, rtmpAddr string) *Server {
 	return &Server{
 		config: config,
+		keys:   keys,
 
 		handler:  h,
 		session:  make(map[string]*rtmprelay.RtmpRelay),
@@ -79,7 +83,7 @@ func NewServer(config Config, h av.Handler, rtmpAddr string) *Server {
 }
 
 func (s *Server) JWTMiddleware(next http.Handler) http.Handler {
-	if !(len(s.config.JWT.Secret) > 0) {
+	if s.config.JWT.Secret == "" {
 		return next
 	}
 	log.Info("Using JWT middleware")
@@ -91,7 +95,7 @@ func (s *Server) JWTMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		if err := validateJWT(r, s.config.JWT.Algorithm); err != nil {
+		if err := s.validateJWT(r); err != nil {
 			res := &Response{
 				w:      w,
 				Status: 403,
@@ -107,7 +111,7 @@ func (s *Server) JWTMiddleware(next http.Handler) http.Handler {
 
 // validateJWT checks the token from the Authorization header, or from the "jwt" query parameter
 // if the header is absent, against the configured secret and signing method.
-func validateJWT(r *http.Request, algorithm jwt.SigningMethod) error {
+func (s *Server) validateJWT(r *http.Request) error {
 	tokenString, err := extractJWT(r)
 	if err != nil {
 		return err
@@ -117,8 +121,8 @@ func validateJWT(r *http.Request, algorithm jwt.SigningMethod) error {
 	}
 
 	_, err = jwt.Parse(tokenString, func(*jwt.Token) (any, error) {
-		return []byte(configure.Config.GetString("jwt.secret")), nil
-	}, jwt.WithValidMethods([]string{algorithm.Alg()}))
+		return []byte(s.config.JWT.Secret), nil
+	}, jwt.WithValidMethods([]string{s.config.JWT.Algorithm.Alg()}))
 	return err
 }
 
@@ -169,7 +173,7 @@ func (s *Server) Serve(l net.Listener) error {
 		s.GetLiveStatics(w, r)
 	})
 	srv := &http.Server{
-		Handler:           JWTMiddleware(mux),
+		Handler:           s.JWTMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.Serve(l)
@@ -423,7 +427,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := configure.RoomKeys.SetKey(room)
+	msg, err := s.keys.ResetKey(r.Context(), room)
 	if err != nil {
 		msg = err.Error()
 		res.Status = 400
@@ -455,7 +459,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := configure.RoomKeys.GetKey(room)
+	msg, err := s.keys.GetOrCreateKey(r.Context(), room)
 	if err != nil {
 		msg = err.Error()
 		res.Status = 400
@@ -486,10 +490,15 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if configure.RoomKeys.DeleteChannel(room) {
+	err := s.keys.DeleteChannel(r.Context(), room)
+	switch {
+	case err == nil:
 		res.Data = "Ok"
-		return
+	case errors.Is(err, roomkey.ErrNotFound):
+		res.Status = 404
+		res.Data = "room not found"
+	default:
+		res.Status = 500
+		res.Data = err.Error()
 	}
-	res.Status = 404
-	res.Data = "room not found"
 }
