@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FLV recordings are created with `0600`, folders with `0750`.
 - A failed flush now closes the RTMP writer.
 - Ignored errors are now handled or logged.
+- `gitignore` to be the standard GoLang gitignore.
 
 ### Fixed
 

@@ -142,6 +142,16 @@ func extractJWT(r *http.Request) (string, error) {
 	return token, nil
 }
 
+// maxRequestBodyBytes caps the request body size.
+const maxRequestBodyBytes = 1 << 20
+
+// parseForm wraps the request body in [http.MaxBytesReader] before calling
+// [http.Request.ParseForm], so an oversized body cannot exhaust memory.
+func parseForm(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	return r.ParseForm()
+}
+
 func (s *Server) Serve(l net.Listener) error {
 	mux := http.NewServeMux()
 
@@ -199,7 +209,7 @@ func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 
 	room := ""
 
-	if err := req.ParseForm(); err == nil {
+	if err := parseForm(w, req); err == nil {
 		room = req.Form.Get("room")
 	}
 
@@ -279,7 +289,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 
 	defer res.send()
 
-	if req.ParseForm() != nil {
+	if parseForm(w, req) != nil {
 		res.Status = 400
 		res.Data = "url: /control/pull?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456"
 		return
@@ -348,7 +358,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 
 	defer res.send()
 
-	if req.ParseForm() != nil {
+	if parseForm(w, req) != nil {
 		res.Data = "url: /control/push?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456"
 		return
 	}
@@ -407,7 +417,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/reset?room=<ROOM_NAME>"
 		return
@@ -438,7 +448,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/get?room=<ROOM_NAME>"
 		return
@@ -469,7 +479,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/delete?room=<ROOM_NAME>"
 		return

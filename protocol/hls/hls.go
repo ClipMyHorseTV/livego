@@ -40,7 +40,7 @@ type Server struct {
 	conns    *sync.Map
 }
 
-// NewServer creates a new HLS server
+// NewServer creates a new HLS server.
 func NewServer(config Config) *Server {
 	ret := &Server{
 		config: config,
@@ -162,7 +162,7 @@ func (server *Server) handle(w http.ResponseWriter, r *http.Request) {
 // writeBody writes a response body; a failed write means the client went away, so it is only logged.
 func writeBody(w http.ResponseWriter, body []byte) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	//nolint:gosec // G705: body is a TS segment or M3U8 playlist served with an explicit media Content-Type and nosniff, never HTML.
+	//nolint:gosec // G705 false positive: bodies are playlists/TS segments with explicit non-HTML Content-Type and nosniff.
 	if _, err := w.Write(body); err != nil {
 		log.Debug("hls: write response: ", err)
 	}
