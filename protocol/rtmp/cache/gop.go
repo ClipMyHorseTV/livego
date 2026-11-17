@@ -77,7 +77,6 @@ func (gopCache *GopCache) writeToArray(chunk *av.Packet, startNew bool) error {
 		}
 		gopCache.nextindex = (gopCache.nextindex + 1) % gopCache.count
 	} else {
-		// the current GOP is the one most recently started, just before nextindex
 		ginc = gopCache.gops[(gopCache.nextindex-1+gopCache.count)%gopCache.count]
 	}
 	return ginc.write(chunk)
@@ -99,7 +98,6 @@ func (gopCache *GopCache) Write(p *av.Packet) {
 }
 
 func (gopCache *GopCache) sendTo(w av.WriteCloser) error {
-	// the num cached GOPs end just before nextindex; send them oldest first
 	start := gopCache.nextindex - gopCache.num + gopCache.count
 	for i := range gopCache.num {
 		g := gopCache.gops[(start+i)%gopCache.count]
