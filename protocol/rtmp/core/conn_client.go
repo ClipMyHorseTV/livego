@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/protocol/amf"
 
 	log "github.com/sirupsen/logrus"
@@ -43,14 +41,17 @@ type ConnClient struct {
 	curcmdName string
 	streamid   uint32
 	isRTMPS    bool
+	config     Config
 	conn       *Conn
 	encoder    *amf.Encoder
 	decoder    *amf.Decoder
 	bytesw     *bytes.Buffer
 }
 
-func NewConnClient() *ConnClient {
+// NewConnClient creates an RTMP client connection.
+func NewConnClient(config Config) *ConnClient {
 	return &ConnClient{
+		config:  config,
 		transID: 1,
 		bytesw:  bytes.NewBuffer(nil),
 		encoder: &amf.Encoder{},
@@ -241,8 +242,7 @@ func (connClient *ConnClient) writePlayMsg() error {
 	return connClient.readRespMsg()
 }
 
-// parseURL takes app, stream name and tcUrl from the RTMP(S) URL and returns the host and
-// the port (with leading colon) to connect to.
+// parseURL takes app, stream name and tcUrl from the RTMP(S) URL and returns the host and the port (with leading colon) to connect to.
 func (connClient *ConnClient) parseURL(url string) (host, port string, err error) {
 	u, err := neturl.Parse(url)
 	if err != nil {
@@ -370,26 +370,8 @@ func (connClient *ConnClient) dial(ctx context.Context, local, remote *net.TCPAd
 		return net.DialTCP("tcp", local, remote)
 	}
 
-	config, err := tlsConfig()
-	if err != nil {
-		return nil, err
-	}
-	dialer := &tls.Dialer{Config: config}
+	dialer := &tls.Dialer{Config: connClient.config.TLSConfig}
 	return dialer.DialContext(ctx, "tcp", remote.String())
-}
-
-// tlsConfig returns the client TLS configuration, verifying against the system roots unless
-// enable_tls_verify is turned off.
-func tlsConfig() (*tls.Config, error) {
-	if !configure.Config.GetBool("enable_tls_verify") {
-		//nolint:gosec // G402: verification is disabled explicitly via the enable_tls_verify option.
-		return &tls.Config{InsecureSkipVerify: true}, nil
-	}
-	roots, err := x509.SystemCertPool()
-	if err != nil {
-		return nil, err
-	}
-	return &tls.Config{RootCAs: roots}, nil
 }
 
 func (connClient *ConnClient) Write(c ChunkStream) error {

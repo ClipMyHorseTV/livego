@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/protocol/amf"
 	"github.com/ClipMyHorseTV/livego/utils/pio"
 	"github.com/ClipMyHorseTV/livego/utils/uid"
@@ -154,7 +153,13 @@ func (writer *FLVWriter) Info() (ret av.Info) {
 	return ret
 }
 
-type FlvDvr struct{}
+type FlvDvr struct {
+	baseDirectory string
+}
+
+func NewFlvDvr(baseDirectory string) (*FlvDvr, error) {
+	return &FlvDvr{baseDirectory: baseDirectory}, nil
+}
 
 func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 	paths := strings.SplitN(info.Key, "/", 2)
@@ -163,15 +168,13 @@ func (f *FlvDvr) GetWriter(info av.Info) av.WriteCloser {
 		return nil
 	}
 
-	flvDir := configure.Config.GetString("flv_dir")
-
-	err := os.MkdirAll(path.Join(flvDir, paths[0]), 0o750)
+	err := os.MkdirAll(path.Join(f.baseDirectory, paths[0]), 0o750)
 	if err != nil {
 		log.Error("mkdir error: ", err)
 		return nil
 	}
 
-	fileName := fmt.Sprintf("%s_%d.%s", path.Join(flvDir, info.Key), time.Now().Unix(), "flv")
+	fileName := fmt.Sprintf("%s_%d.%s", path.Join(f.baseDirectory, info.Key), time.Now().Unix(), "flv")
 	log.Debug("flv dvr save stream to: ", fileName)
 	w, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {

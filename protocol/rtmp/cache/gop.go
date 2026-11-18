@@ -77,7 +77,7 @@ func (gopCache *GopCache) writeToArray(chunk *av.Packet, startNew bool) error {
 		}
 		gopCache.nextindex = (gopCache.nextindex + 1) % gopCache.count
 	} else {
-		ginc = gopCache.gops[(gopCache.nextindex+1)%gopCache.count]
+		ginc = gopCache.gops[(gopCache.nextindex-1+gopCache.count)%gopCache.count]
 	}
 	return ginc.write(chunk)
 }
@@ -98,16 +98,10 @@ func (gopCache *GopCache) Write(p *av.Packet) {
 }
 
 func (gopCache *GopCache) sendTo(w av.WriteCloser) error {
-	var err error
-	pos := (gopCache.nextindex + 1) % gopCache.count
+	start := gopCache.nextindex - gopCache.num + gopCache.count
 	for i := range gopCache.num {
-		index := (pos - gopCache.num + 1) + i
-		if index < 0 {
-			index += gopCache.count
-		}
-		g := gopCache.gops[index]
-		err = g.send(w)
-		if err != nil {
+		g := gopCache.gops[(start+i)%gopCache.count]
+		if err := g.send(w); err != nil {
 			return err
 		}
 	}

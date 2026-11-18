@@ -1,12 +1,10 @@
 package rtmprelay
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/core"
 
 	log "github.com/sirupsen/logrus"
@@ -18,41 +16,25 @@ type StaticPush struct {
 	sndctrlChan   chan string
 	connectClient *core.ConnClient
 	startflag     bool
+	config        core.Config
 }
 
 var (
-	StaticPushMap          = make(map[string](*StaticPush))
-	mapLock                = new(sync.RWMutex)
-	PushURLList   []string = nil
+	StaticPushMap = make(map[string](*StaticPush))
+	mapLock       = new(sync.RWMutex)
 )
 
 var StaticRelayStopCtrl = "STATIC_RTMPRELAY_STOP"
 
-func GetStaticPushList(appname string) ([]string, error) {
-	if PushURLList == nil {
-		// Do not unmarshel the config every time, lots of reflect works -gs
-		pushurlList, ok := configure.GetStaticPushURLList(appname)
-		if !ok {
-			PushURLList = []string{}
-		} else {
-			PushURLList = pushurlList
-		}
-	}
-
-	if len(PushURLList) == 0 {
-		return nil, errors.New("no static push url")
-	}
-
-	return PushURLList, nil
-}
-
-func GetAndCreateStaticPushObject(rtmpurl string) *StaticPush {
+// GetAndCreateStaticPushObject returns the static push for rtmpurl, creating it if needed.
+// config configures the push connection.
+func GetAndCreateStaticPushObject(rtmpurl string, config core.Config) *StaticPush {
 	mapLock.RLock()
 	staticpush, ok := StaticPushMap[rtmpurl]
 	log.Debugf("GetAndCreateStaticPushObject: %s, return %v", rtmpurl, ok)
 	if !ok {
 		mapLock.RUnlock()
-		newStaticpush := NewStaticPush(rtmpurl)
+		newStaticpush := NewStaticPush(rtmpurl, config)
 
 		mapLock.Lock()
 		StaticPushMap[rtmpurl] = newStaticpush
@@ -91,8 +73,9 @@ func ReleaseStaticPushObject(rtmpurl string) {
 	}
 }
 
-func NewStaticPush(rtmpurl string) *StaticPush {
+func NewStaticPush(rtmpurl string, config core.Config) *StaticPush {
 	return &StaticPush{
+		config:        config,
 		RtmpURL:       rtmpurl,
 		packetChan:    make(chan *av.Packet, 500),
 		sndctrlChan:   make(chan string),
@@ -106,7 +89,7 @@ func (sp *StaticPush) Start() error {
 		return fmt.Errorf("StaticPush already start %s", sp.RtmpURL)
 	}
 
-	sp.connectClient = core.NewConnClient()
+	sp.connectClient = core.NewConnClient(sp.config)
 
 	log.Debugf("static publish server addr:%v starting....", sp.RtmpURL)
 	err := sp.connectClient.Start(sp.RtmpURL, "publish")

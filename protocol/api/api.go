@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/ClipMyHorseTV/livego/av"
-	"github.com/ClipMyHorseTV/livego/configure"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp"
 	"github.com/ClipMyHorseTV/livego/protocol/rtmp/rtmprelay"
+	"github.com/ClipMyHorseTV/livego/roomkey"
 
 	"github.com/golang-jwt/jwt/v5"
 	log "github.com/sirupsen/logrus"
@@ -61,25 +61,31 @@ type ClientInfo struct {
 }
 
 type Server struct {
+	config Config
+	keys   roomkey.Store
+
 	handler  av.Handler
 	session  map[string]*rtmprelay.RtmpRelay
 	rtmpAddr string
 }
 
-func NewServer(h av.Handler, rtmpAddr string) *Server {
+// NewServer creates an API server. keys must be the same Store passed to the RTMP server so that
+// keys handed out by the API are accepted when publishing.
+func NewServer(config Config, keys roomkey.Store, h av.Handler, rtmpAddr string) *Server {
 	return &Server{
+		config: config,
+		keys:   keys,
+
 		handler:  h,
 		session:  make(map[string]*rtmprelay.RtmpRelay),
 		rtmpAddr: rtmpAddr,
 	}
 }
 
-func JWTMiddleware(next http.Handler) http.Handler {
-	isJWT := len(configure.Config.GetString("jwt.secret")) > 0
-	if !isJWT {
+func (s *Server) JWTMiddleware(next http.Handler) http.Handler {
+	if s.config.JWT.Secret == "" {
 		return next
 	}
-
 	log.Info("Using JWT middleware")
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,16 +95,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		var algorithm jwt.SigningMethod
-		if len(configure.Config.GetString("jwt.algorithm")) > 0 {
-			algorithm = jwt.GetSigningMethod(configure.Config.GetString("jwt.algorithm"))
-		}
-
-		if algorithm == nil {
-			algorithm = jwt.SigningMethodHS256
-		}
-
-		if err := validateJWT(r, algorithm); err != nil {
+		if err := s.validateJWT(r); err != nil {
 			res := &Response{
 				w:      w,
 				Status: 403,
@@ -114,7 +111,7 @@ func JWTMiddleware(next http.Handler) http.Handler {
 
 // validateJWT checks the token from the Authorization header, or from the "jwt" query parameter
 // if the header is absent, against the configured secret and signing method.
-func validateJWT(r *http.Request, algorithm jwt.SigningMethod) error {
+func (s *Server) validateJWT(r *http.Request) error {
 	tokenString, err := extractJWT(r)
 	if err != nil {
 		return err
@@ -124,8 +121,8 @@ func validateJWT(r *http.Request, algorithm jwt.SigningMethod) error {
 	}
 
 	_, err = jwt.Parse(tokenString, func(*jwt.Token) (any, error) {
-		return []byte(configure.Config.GetString("jwt.secret")), nil
-	}, jwt.WithValidMethods([]string{algorithm.Alg()}))
+		return []byte(s.config.JWT.Secret), nil
+	}, jwt.WithValidMethods([]string{s.config.JWT.Algorithm.Alg()}))
 	return err
 }
 
@@ -140,6 +137,16 @@ func extractJWT(r *http.Request) (string, error) {
 		return "", errors.New("authorization header format must be Bearer {token}")
 	}
 	return token, nil
+}
+
+// maxRequestBodyBytes caps the request body size.
+const maxRequestBodyBytes = 1 << 20
+
+// parseForm wraps the request body in [http.MaxBytesReader] before calling
+// [http.Request.ParseForm], so an oversized body cannot exhaust memory.
+func parseForm(w http.ResponseWriter, r *http.Request) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	return r.ParseForm()
 }
 
 func (s *Server) Serve(l net.Listener) error {
@@ -166,7 +173,7 @@ func (s *Server) Serve(l net.Listener) error {
 		s.GetLiveStatics(w, r)
 	})
 	srv := &http.Server{
-		Handler:           JWTMiddleware(mux),
+		Handler:           s.JWTMiddleware(mux),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return srv.Serve(l)
@@ -199,7 +206,7 @@ func (server *Server) GetLiveStatics(w http.ResponseWriter, req *http.Request) {
 
 	room := ""
 
-	if err := req.ParseForm(); err == nil {
+	if err := parseForm(w, req); err == nil {
 		room = req.Form.Get("room")
 	}
 
@@ -279,7 +286,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 
 	defer res.send()
 
-	if req.ParseForm() != nil {
+	if parseForm(w, req) != nil {
 		res.Status = 400
 		res.Data = "url: /control/pull?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456"
 		return
@@ -319,7 +326,7 @@ func (s *Server) handlePull(w http.ResponseWriter, req *http.Request) {
 		res.Data = retString
 		log.Debugf("pull stop return %s", retString)
 	} else {
-		pullRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
+		pullRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl, s.config.Relay)
 		log.Debugf("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pullRtmprelay.Start()
 		if err != nil {
@@ -348,7 +355,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 
 	defer res.send()
 
-	if req.ParseForm() != nil {
+	if parseForm(w, req) != nil {
 		res.Data = "url: /control/push?&oper=start&app=live&name=123456&url=rtmp://192.168.16.136/live/123456"
 		return
 	}
@@ -383,7 +390,7 @@ func (s *Server) handlePush(w http.ResponseWriter, req *http.Request) {
 		res.Data = retString
 		log.Debugf("push stop return %s", retString)
 	} else {
-		pushRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl)
+		pushRtmprelay := rtmprelay.NewRtmpRelay(&localurl, &remoteurl, s.config.Relay)
 		log.Debugf("rtmprelay start push %s from %s", remoteurl, localurl)
 		err = pushRtmprelay.Start()
 		if err != nil {
@@ -407,7 +414,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/reset?room=<ROOM_NAME>"
 		return
@@ -420,7 +427,7 @@ func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := configure.RoomKeys.SetKey(room)
+	msg, err := s.keys.ResetKey(r.Context(), room)
 	if err != nil {
 		msg = err.Error()
 		res.Status = 400
@@ -438,7 +445,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/get?room=<ROOM_NAME>"
 		return
@@ -452,7 +459,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg, err := configure.RoomKeys.GetKey(room)
+	msg, err := s.keys.GetOrCreateKey(r.Context(), room)
 	if err != nil {
 		msg = err.Error()
 		res.Status = 400
@@ -469,7 +476,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer res.send()
 
-	if err := r.ParseForm(); err != nil {
+	if err := parseForm(w, r); err != nil {
 		res.Status = 400
 		res.Data = "url: /control/delete?room=<ROOM_NAME>"
 		return
@@ -483,10 +490,15 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if configure.RoomKeys.DeleteChannel(room) {
+	err := s.keys.DeleteChannel(r.Context(), room)
+	switch {
+	case err == nil:
 		res.Data = "Ok"
-		return
+	case errors.Is(err, roomkey.ErrNotFound):
+		res.Status = 404
+		res.Data = "room not found"
+	default:
+		res.Status = 500
+		res.Data = err.Error()
 	}
-	res.Status = 404
-	res.Data = "room not found"
 }
