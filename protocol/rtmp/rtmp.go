@@ -445,21 +445,14 @@ func (v *VirWriter) SendPacket() error {
 		v.SaveStatics(p.StreamID, uint64(cs.Length), p.IsVideo)
 		v.SetPreTime()
 		v.RecTimeStamp(cs.Timestamp, cs.TypeID)
-		err = v.conn.Write(cs)
-		if err != nil {
+		if err := v.conn.Write(cs); err != nil {
 			v.markClosed()
-			v.SaveStatics(p.StreamID, uint64(cs.Length), p.IsVideo)
-			v.SetPreTime()
-			v.RecTimeStamp(cs.Timestamp, cs.TypeID)
-			if err := v.conn.Write(cs); err != nil {
+			return err
+		}
+		if canFlush {
+			if err := flusher.Flush(); err != nil {
 				v.markClosed()
 				return err
-			}
-			if canFlush {
-				if err := flusher.Flush(); err != nil {
-					v.markClosed()
-					return err
-				}
 			}
 		}
 	}
